@@ -1,0 +1,6 @@
+{
+  "name": "سپر نت",
+  "description": "فیلترشکن و ابزار عبور از محدودیت اینترنت با پشتیبانی از DNS رمزنگاری‌شده، تکه‌تکه‌سازی بسته‌های TLS، پروفایل‌های V2Ray/SOCKS و تونل هوشمند برنامه‌های ایرانی",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

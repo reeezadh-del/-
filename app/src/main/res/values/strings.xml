@@ -1,0 +1,68 @@
+<resources>
+    <string name="app_name">سپر نت</string>
+    <string name="app_tagline">تونل امن و هوشمند عبور از محدودیت</string>
+
+    <!-- Navigation -->
+    <string name="nav_connect">اتصال</string>
+    <string name="nav_profiles">سرورها</string>
+    <string name="nav_split_tunnel">برنامه‌ها</string>
+    <string name="nav_tools">ابزارها</string>
+
+    <!-- Status -->
+    <string name="status_disconnected">قطع شده</string>
+    <string name="status_connecting">در حال برقراری تونل…</string>
+    <string name="status_connected">متصل و ایمن</string>
+    <string name="status_disconnecting">در حال قطع اتصال…</string>
+    <string name="status_error">خطا در اتصال</string>
+
+    <!-- Connect Screen -->
+    <string name="btn_connect">اتصال امن</string>
+    <string name="btn_disconnect">قطع اتصال</string>
+    <string name="btn_connecting">لغو اتصال</string>
+    <string name="label_active_mode">حالت عبور</string>
+    <string name="label_active_profile">پروفایل فعال</string>
+    <string name="label_no_profile">حالت ضد فیلتر SNI + DoH (بدون سرور)</string>
+    <string name="label_dns_resolver">DNS رمزنگاری‌شده</string>
+    <string name="label_download">دریافت</string>
+    <string name="label_upload">ارسال</string>
+    <string name="label_duration">مدت اتصال</string>
+    <string name="label_latency">پینگ</string>
+    <string name="label_protection_summary">مسیر رمزنگاری‌شده DNS-over-HTTPS و قطعه‌بندی TLS</string>
+
+    <!-- Modes -->
+    <string name="mode_dpi_doh">ضد فیلتر هوشمند (TLS Fragment + DoH)</string>
+    <string name="mode_proxy_chain">تونل از طریق پروفایل پروکسی + DoH</string>
+    <string name="mode_doh_only">فقط DNS امن (ضد مسمومیت DNS)</string>
+
+    <!-- Profiles Screen -->
+    <string name="profiles_title">سرورها و اشتراک‌ها</string>
+    <string name="btn_paste_clipboard">افزودن از کلیپ‌بورد</string>
+    <string name="btn_add_manual">افزودن دستی / اشتراک</string>
+    <string name="btn_test_all">تست پینگ همه</string>
+    <string name="empty_profiles_title">هنوز سروری اضافه نشده است</string>
+    <string name="empty_profiles_desc">لینک‌های VLESS، VMess، Trojan، Shadowsocks، SOCKS یا لینک اشتراک (Subscription) را وارد کنید تا پینگ واقعی آن‌ها روی اینترنت شما سنجیده شود. همچنین بدون سرور هم می‌توانید از حالت ضد فیلتر TLS + DoH استفاده کنید.</string>
+
+    <!-- Split Tunnel Screen -->
+    <string name="split_title">مدیریت برنامه‌ها (Split Tunnel)</string>
+    <string name="split_desc">برنامه‌های ایرانی (بانک‌ها، اسنپ، بلد و…) را انتخاب کنید تا مستقیماً بدون VPN به اینترنت وصل شوند و اختلالی نداشته باشند.</string>
+    <string name="split_search_hint">جستجوی نام برنامه یا پکیج…</string>
+    <string name="split_preset_iranian">انتخاب خودکار اپ‌های ایرانی نصب‌شده</string>
+    <string name="split_bypassed_badge">عبور مستقیم</string>
+    <string name="split_tunneled_badge">از طریق تونل</string>
+
+    <!-- Tools / Settings Screen -->
+    <string name="tools_title">ابزارهای شبکه و تنظیمات</string>
+    <string name="tool_dns_title">تنظیمات DNS امن (DoH)</string>
+    <string name="tool_fragment_title">تکه‌تکه‌سازی بسته‌های TLS (Anti-DPI)</string>
+    <string name="tool_fragment_desc">بسته اولیه TLS ClientHello را به قطعات کوچک می‌شکند تا فیلترینگ SNI نتواند دامنه را مسدود کند.</string>
+    <string name="tool_clean_ip_title">اسکنر سلامت اتصال و آی‌پی تمیز</string>
+    <string name="tool_clean_ip_desc">بررسی واقعی دسترس‌پذیری رنج‌های Cloudflare و سرویس‌های DoH روی اپراتور فعلی شما (همراه اول، ایرانسل، مخابرات…)</string>
+    <string name="btn_run_scan">شروع تست واقعی شبکه</string>
+    <string name="tool_logs_title">گزارش لحظه‌ای تونل</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_name">وضعیت اتصال سپر نت</string>
+    <string name="notif_channel_desc">نمایش وضعیت فعال بودن تونل VPN و آمار ترافیک</string>
+    <string name="notif_title_connected">سپر نت متصل است</string>
+    <string name="notif_title_connecting">در حال اتصال به سپر نت…</string>
+</resources>
