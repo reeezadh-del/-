@@ -158,25 +158,30 @@ class SeparVpnService : VpnService() {
 
             connectCommandClient()
 
-            // Wait briefly for sing-box mixed-in (127.0.0.1:10808) & TUN to bind, then verify real traffic
-            kotlinx.coroutines.delay(350)
-            VpnRuntimeState.appendLog("VPN", "در حال تست واقعی عبور ترافیک از تونل...")
-            val probeResult = com.example.data.NetworkProbe.verifyTunnelReachability()
+            // Wait briefly for sing-box mixed-in (127.0.0.1:10808) & TUN to bind, then verify Instagram actually loads
+            kotlinx.coroutines.delay(400)
+            promoteToForeground("در حال تست باز شدن اینستاگرام…")
+            VpnRuntimeState.appendLog("VPN", "در حال تست واقعی لود شدن اینستاگرام از طریق تونل…")
+            val probeResult = com.example.data.NetworkProbe.verifyInstagramLoadThroughTunnel()
             val exitInfo = probeResult.getOrElse { err ->
                 throw IllegalStateException(
                     if (effectiveMode == VpnMode.PROXY_CHAIN) {
-                        "اتصال به سرور خارجی برقرار نشد (سرور پاسخ نداد یا فیلتر است): ${err.message ?: "خطای شبکه"}"
+                        "اینستاگرام با این سرور باز نشد — اتصال لغو شد (${err.message ?: "خطای شبکه"}). سرور دیگری در تب سرورها انتخاب کنید."
                     } else {
-                        "ترافیک از تونل عبور نکرد: ${err.message ?: "خطای شبکه"}"
+                        "اینستاگرام بدون سرور خارجی باز نشد! برای باز شدن اینستاگرام یک کانفیگ معتبر در تب «سرورها» اضافه کنید."
                     }
                 )
             }
 
-            VpnRuntimeState.setExitIpInfo(exitInfo)
-            VpnRuntimeState.appendLog(
-                "VPN",
-                "تست واقعی موفق بود — IP خروج: ${exitInfo.ip} (${exitInfo.countryCode})"
-            )
+            if (exitInfo != null) {
+                VpnRuntimeState.setExitIpInfo(exitInfo)
+                VpnRuntimeState.appendLog(
+                    "VPN",
+                    "اینستاگرام با موفقیت لود شد — IP خروج: ${exitInfo.ip} (${exitInfo.countryCode})"
+                )
+            } else {
+                VpnRuntimeState.appendLog("VPN", "سایت اینستاگرام از طریق تونل با موفقیت لود شد")
+            }
 
             val serverLabel = if (effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile != null) {
                 "${selectedProfile.name} (${selectedProfile.protocol.displayName})"
@@ -190,8 +195,9 @@ class SeparVpnService : VpnService() {
                 activeServerLabel = serverLabel
             )
             VpnRuntimeState.updateState(ConnectionState.Connected, effectiveMode)
+            val countrySuffix = exitInfo?.countryCode?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
             promoteToForeground(
-                if (serverLabel != null) "سپر نت متصل (${exitInfo.countryCode}): $serverLabel"
+                if (serverLabel != null) "سپر نت متصل$countrySuffix: $serverLabel"
                 else getString(R.string.notif_title_connected)
             )
             VpnRuntimeState.appendLog(

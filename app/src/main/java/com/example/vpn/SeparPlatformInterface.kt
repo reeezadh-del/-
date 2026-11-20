@@ -71,6 +71,9 @@ class SeparPlatformInterface(
             val dnsServer = runCatching { options.dnsServerAddress?.value }.getOrNull()
                 ?.takeIf { it.isNotBlank() } ?: "172.19.0.2"
             runCatching { builder.addDnsServer(dnsServer) }
+            if (dnsServer.count { it == '.' } == 3) {
+                runCatching { builder.addRoute(dnsServer, 32) }
+            }
 
             var addedIpv4Route = false
             val inet4Routes = options.inet4RouteAddress

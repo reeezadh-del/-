@@ -101,6 +101,78 @@ object NetworkProbe {
         val isp: String
     )
 
+    suspend fun verifyInstagramLoadThroughTunnel(): Result<ExitIpInfo?> =
+        withContext(Dispatchers.IO) {
+            val tunnelClient = OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .proxy(
+                    java.net.Proxy(
+                        java.net.Proxy.Type.HTTP,
+                        InetSocketAddress("127.0.0.1", 10808)
+                    )
+                )
+                .build()
+
+            try {
+                val request = Request.Builder()
+                    .url("https://www.instagram.com/")
+                    .header(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                    )
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .build()
+
+                tunnelClient.newCall(request).execute().use { response ->
+                    val finalHost = response.request.url.host.lowercase()
+                    if (finalHost.contains("peyvandha") || finalHost.startsWith("10.10.34.")) {
+                        return@withContext Result.failure(
+                            IllegalStateException("ترافیک اینستاگرام توسط فیلترینگ مسدود یا ریدایرکت شد")
+                        )
+                    }
+                    if (!finalHost.endsWith("instagram.com") && !finalHost.endsWith("facebook.com")) {
+                        return@withContext Result.failure(
+                            IllegalStateException("پاسخ از سرور غیرمعتبر دریافت شد ($finalHost)")
+                        )
+                    }
+                    if (response.code !in 200..499) {
+                        return@withContext Result.failure(
+                            IllegalStateException("خطای HTTP ${response.code} هنگام باز کردن اینستاگرام")
+                        )
+                    }
+                    val snippet = response.body?.charStream()?.let { reader ->
+                        val buf = CharArray(4096)
+                        val read = reader.read(buf)
+                        if (read > 0) String(buf, 0, read) else ""
+                    }.orEmpty()
+
+                    if (snippet.contains("peyvandha.ir", ignoreCase = true) ||
+                        snippet.contains("10.10.34.", ignoreCase = true)
+                    ) {
+                        return@withContext Result.failure(
+                            IllegalStateException("صفحه مسدودسازی داخلی شناسایی شد")
+                        )
+                    }
+                    if (response.code == 200 && snippet.isBlank()) {
+                        return@withContext Result.failure(
+                            IllegalStateException("بدنه صفحه اینستاگرام خالی بود")
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                return@withContext Result.failure(
+                    IllegalStateException("لود نشدن سایت اینستاگرام: ${e.message ?: e.javaClass.simpleName}", e)
+                )
+            }
+
+            // Instagram loaded cleanly; also grab exit IP info for display
+            val exitInfo = checkExitIp(viaSingBoxProxy = true).getOrNull()
+            Result.success(exitInfo)
+        }
+
     suspend fun verifyTunnelReachability(): Result<ExitIpInfo> = checkExitIp(viaSingBoxProxy = true)
 
     suspend fun checkExitIp(viaSingBoxProxy: Boolean): Result<ExitIpInfo> =

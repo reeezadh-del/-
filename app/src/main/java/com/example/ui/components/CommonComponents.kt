@@ -149,10 +149,10 @@ fun StatusPill(
     modifier: Modifier = Modifier
 ) {
     val (bgColor, fgColor, label) = when (state) {
-        ConnectionState.Connected -> Triple(EmeraldContainer, EmeraldPrimary, "متصل و ایمن")
-        ConnectionState.Connecting -> Triple(SaffronContainer, SaffronAmber, "در حال اتصال…")
+        ConnectionState.Connected -> Triple(EmeraldContainer, EmeraldPrimary, "متصل (اینستاگرام باز است)")
+        ConnectionState.Connecting -> Triple(SaffronContainer, SaffronAmber, "در حال تست اینستاگرام…")
         ConnectionState.Disconnecting -> Triple(SaffronContainer, SaffronAmber, "در حال قطع…")
-        is ConnectionState.Error -> Triple(CoralContainer, CoralError, "خطا در اتصال")
+        is ConnectionState.Error -> Triple(CoralContainer, CoralError, "اتصال ناموفق")
         ConnectionState.Disconnected -> Triple(ObsidianSurfaceElevated, TextSecondary, "آماده اتصال")
     }
 
