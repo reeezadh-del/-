@@ -18,7 +18,7 @@ class ProtocolConverters {
         ProxyProtocol.entries.firstOrNull { it.name == value } ?: ProxyProtocol.VLESS
 }
 
-@Database(entities = [ProxyProfile::class], version = 1, exportSchema = false)
+@Database(entities = [ProxyProfile::class], version = 2, exportSchema = false)
 @TypeConverters(ProtocolConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun proxyProfileDao(): ProxyProfileDao
@@ -33,7 +33,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "separ_net_db"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }

@@ -44,7 +44,9 @@ data class MainUiState(
     val isTestingProfiles: Boolean = false,
     val isImportingSubscription: Boolean = false,
     val logs: List<TunnelLogEntry> = emptyList(),
-    val bannerMessage: String? = null
+    val bannerMessage: String? = null,
+    val exitIpInfo: NetworkProbe.ExitIpInfo? = null,
+    val isCheckingExitIp: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -60,6 +62,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isTestingProfiles = MutableStateFlow(false)
     private val _isImportingSub = MutableStateFlow(false)
     private val _bannerMessage = MutableStateFlow<String?>(null)
+    private val _exitIpInfo = MutableStateFlow<NetworkProbe.ExitIpInfo?>(null)
+    private val _isCheckingExitIp = MutableStateFlow(false)
 
     private val baseDataFlow = combine(
         VpnRuntimeState.telemetry,
@@ -71,6 +75,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BaseSnapshot(telemetry, settings, profiles, selectedProfile, logs)
     }
 
+    private val ipStateFlow = combine(_exitIpInfo, _isCheckingExitIp) { info, checking ->
+        info to checking
+    }
+
     private val auxStateFlow = combine(
         _installedAppsRaw,
         _appsLoading,
@@ -78,9 +86,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isScanningNetwork,
         _isTestingProfiles,
         _isImportingSub,
-        _bannerMessage
+        _bannerMessage,
+        ipStateFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
+        val ipPair = values[7] as Pair<NetworkProbe.ExitIpInfo?, Boolean>
         AuxSnapshot(
             apps = values[0] as List<InstalledAppInfo>,
             appsLoading = values[1] as Boolean,
@@ -88,7 +98,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isScanning = values[3] as Boolean,
             isTesting = values[4] as Boolean,
             isImporting = values[5] as Boolean,
-            banner = values[6] as String?
+            banner = values[6] as String?,
+            exitIpInfo = ipPair.first,
+            isCheckingExitIp = ipPair.second
         )
     }
 
@@ -107,7 +119,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isTestingProfiles = aux.isTesting,
             isImportingSubscription = aux.isImporting,
             logs = base.logs,
-            bannerMessage = aux.banner
+            bannerMessage = aux.banner,
+            exitIpInfo = aux.exitIpInfo,
+            isCheckingExitIp = aux.isCheckingExitIp
         )
     }.stateIn(
         scope = viewModelScope,
@@ -204,6 +218,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val firstInserted = profileRepo.getAllOnce().firstOrNull()
                 if (firstInserted != null && profileRepo.getSelectedProfile() == null) {
                     profileRepo.select(firstInserted.id)
+                    settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
                 }
                 showBanner("${parsed.size} پروفایل با موفقیت اضافه شد")
                 testAllProfiles()
@@ -266,6 +281,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.fold(
                 onSuccess = { list ->
                     profileRepo.replaceSubscriptionProfiles(url, list)
+                    val first = profileRepo.getAllOnce().firstOrNull()
+                    if (first != null && profileRepo.getSelectedProfile() == null) {
+                        profileRepo.select(first.id)
+                        settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+                    }
                     showBanner("${list.size} سرور از لینک اشتراک دریافت شد")
                     testAllProfiles()
                 },
@@ -279,12 +299,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectProfile(profile: ProxyProfile) {
         viewModelScope.launch {
             profileRepo.select(profile.id)
-            if (profile.protocol.supportsDirectTunnel) {
-                settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
-                showBanner("پروفایل ${profile.name} انتخاب شد (حالت تونل پروکسی فعال)")
-            } else {
-                showBanner("پروفایل ${profile.name} ذخیره و انتخاب شد (برای تست پینگ و اطلاعات)")
-            }
+            settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+            showBanner("سرور ${profile.name} انتخاب و حالت تونل کامل فعال شد")
+        }
+    }
+
+    fun checkExitIp() {
+        if (_isCheckingExitIp.value) return
+        viewModelScope.launch {
+            _isCheckingExitIp.value = true
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val result = NetworkProbe.checkExitIp(viaSingBoxProxy = isConnected)
+            _isCheckingExitIp.value = false
+            result.fold(
+                onSuccess = { _exitIpInfo.value = it },
+                onFailure = { showBanner("خطا در بررسی IP خروج: ${it.message ?: "نامشخص"}") }
+            )
         }
     }
 
@@ -449,6 +479,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val isScanning: Boolean,
         val isTesting: Boolean,
         val isImporting: Boolean,
-        val banner: String?
+        val banner: String?,
+        val exitIpInfo: NetworkProbe.ExitIpInfo?,
+        val isCheckingExitIp: Boolean
     )
 }

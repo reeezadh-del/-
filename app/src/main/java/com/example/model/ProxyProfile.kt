@@ -6,10 +6,10 @@ import androidx.room.PrimaryKey
 enum class ProxyProtocol(val displayName: String, val supportsDirectTunnel: Boolean) {
     SOCKS5("SOCKS5", true),
     HTTP("HTTP", true),
-    VLESS("VLESS", false),
-    VMESS("VMess", false),
-    TROJAN("Trojan", false),
-    SHADOWSOCKS("SS", false)
+    VLESS("VLESS", true),
+    VMESS("VMess", true),
+    TROJAN("Trojan", true),
+    SHADOWSOCKS("SS", true)
 }
 
 @Entity(tableName = "proxy_profiles")
@@ -25,6 +25,13 @@ data class ProxyProfile(
     val transport: String = "tcp",
     val security: String = "none",
     val path: String = "",
+    val hostHeader: String = "",
+    val flow: String = "",
+    val fingerprint: String = "chrome",
+    val realityPublicKey: String = "",
+    val realityShortId: String = "",
+    val alpn: String = "",
+    val allowInsecure: Boolean = false,
     val rawUri: String,
     val subscriptionSource: String = "",
     val latencyMs: Long? = null,

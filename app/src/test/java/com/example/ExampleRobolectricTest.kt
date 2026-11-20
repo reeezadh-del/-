@@ -90,4 +90,57 @@ class ExampleRobolectricTest {
         assertEquals(54321, dstPort)
         assertNotNull(respPacket)
     }
+
+    @Test
+    fun `singbox config builder generates valid vless reality and anti-dpi configs`() {
+        val vlessRealityUri =
+            "vless://33333333-3333-3333-3333-333333333333@de.example.com:443?security=reality&sni=www.google.com&fp=chrome&pbk=abc123pbk&sid=01ab&flow=xtls-rprx-vision#GermanyReality"
+        val profile = ConfigUriParser.parseSingle(vlessRealityUri)
+        assertNotNull(profile)
+
+        val proxySettings = com.example.data.UserSettings(
+            vpnMode = com.example.model.VpnMode.PROXY_CHAIN
+        )
+        val proxyJson = com.example.vpn.SingBoxConfigBuilder.buildConfig(
+            settings = proxySettings,
+            profile = profile,
+            localSocksAntiDpiPort = 0
+        )
+        val parsedProxy = org.json.JSONObject(proxyJson)
+        assertEquals("proxy", parsedProxy.getJSONObject("route").getString("final"))
+        val outbounds = parsedProxy.getJSONArray("outbounds")
+        val vlessOutbound = outbounds.getJSONObject(0)
+        assertEquals("vless", vlessOutbound.getString("type"))
+        assertEquals("xtls-rprx-vision", vlessOutbound.getString("flow"))
+        assertTrue(vlessOutbound.getJSONObject("tls").getJSONObject("reality").getBoolean("enabled"))
+        assertEquals("abc123pbk", vlessOutbound.getJSONObject("tls").getJSONObject("reality").getString("public_key"))
+
+        val dpiSettings = com.example.data.UserSettings(
+            vpnMode = com.example.model.VpnMode.DPI_FRAGMENT_DOH
+        )
+        val dpiJson = com.example.vpn.SingBoxConfigBuilder.buildConfig(
+            settings = dpiSettings,
+            profile = null,
+            localSocksAntiDpiPort = 19080
+        )
+        val dpiParsed = org.json.JSONObject(dpiJson)
+        assertEquals("anti-dpi-socks", dpiParsed.getJSONObject("route").getString("final"))
+
+        val vlessTlsWs = ConfigUriParser.parseSingle(
+            "vless://44444444-4444-4444-4444-444444444444@cdn.example.com:443?security=tls&sni=cdn.example.com&type=ws&path=/ws#CloudflareTls"
+        )
+        assertNotNull(vlessTlsWs)
+        val tlsFragJson = com.example.vpn.SingBoxConfigBuilder.buildConfig(
+            settings = com.example.data.UserSettings(
+                vpnMode = com.example.model.VpnMode.PROXY_CHAIN,
+                tlsFragmentEnabled = true,
+                fragmentDelayMs = 200
+            ),
+            profile = vlessTlsWs,
+            localSocksAntiDpiPort = 0
+        )
+        val tlsFragObj = org.json.JSONObject(tlsFragJson).getJSONArray("outbounds").getJSONObject(0).getJSONObject("tls")
+        assertTrue(tlsFragObj.getBoolean("fragment"))
+        assertEquals("200ms", tlsFragObj.getString("fragment_fallback_delay"))
+    }
 }

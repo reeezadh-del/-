@@ -54,6 +54,15 @@ object ConfigUriParser {
         val security = uri.getQueryParameter("security").orEmpty().ifBlank { "none" }
         val transport = uri.getQueryParameter("type").orEmpty().ifBlank { "tcp" }
         val path = uri.getQueryParameter("path").orEmpty()
+            .ifBlank { uri.getQueryParameter("serviceName").orEmpty() }
+        val hostHeader = uri.getQueryParameter("host").orEmpty()
+        val flow = uri.getQueryParameter("flow").orEmpty()
+        val fp = uri.getQueryParameter("fp").orEmpty().ifBlank { "chrome" }
+        val pbk = uri.getQueryParameter("pbk").orEmpty()
+        val sid = uri.getQueryParameter("sid").orEmpty()
+        val alpn = uri.getQueryParameter("alpn").orEmpty()
+        val allowInsecure = uri.getQueryParameter("allowInsecure") == "1" ||
+            uri.getQueryParameter("insecure") == "1"
         val remark = decodeFragment(uri.fragment).ifBlank { "$host:$port" }
 
         return ProxyProfile(
@@ -66,6 +75,13 @@ object ConfigUriParser {
             transport = transport,
             security = security,
             path = path,
+            hostHeader = hostHeader,
+            flow = flow,
+            fingerprint = fp,
+            realityPublicKey = pbk,
+            realityShortId = sid,
+            alpn = alpn,
+            allowInsecure = allowInsecure,
             rawUri = rawUri,
             subscriptionSource = sub
         )
@@ -83,19 +99,27 @@ object ConfigUriParser {
         val uuid = json.optString("id").trim()
         val net = json.optString("net").trim().ifBlank { "tcp" }
         val tls = json.optString("tls").trim().ifBlank { "none" }
-        val sni = json.optString("sni").trim().ifBlank { json.optString("host").trim() }
+        val hostHeader = json.optString("host").trim()
+        val sni = json.optString("sni").trim().ifBlank { hostHeader }
         val path = json.optString("path").trim()
+        val fp = json.optString("fp").trim().ifBlank { "chrome" }
+        val alpn = json.optString("alpn").trim()
+        val alterId = json.optString("aid").trim().ifBlank { json.optInt("aid", 0).toString() }
 
         return ProxyProfile(
             name = ps,
             protocol = ProxyProtocol.VMESS,
             host = host,
             port = port,
+            username = alterId, // store alterId for VMess
             passwordOrUuid = uuid,
             sni = sni,
             transport = net,
             security = tls,
             path = path,
+            hostHeader = hostHeader,
+            fingerprint = fp,
+            alpn = alpn,
             rawUri = rawUri,
             subscriptionSource = sub
         )
@@ -110,6 +134,12 @@ object ConfigUriParser {
         val security = uri.getQueryParameter("security").orEmpty().ifBlank { "tls" }
         val transport = uri.getQueryParameter("type").orEmpty().ifBlank { "tcp" }
         val path = uri.getQueryParameter("path").orEmpty()
+            .ifBlank { uri.getQueryParameter("serviceName").orEmpty() }
+        val hostHeader = uri.getQueryParameter("host").orEmpty()
+        val fp = uri.getQueryParameter("fp").orEmpty().ifBlank { "chrome" }
+        val alpn = uri.getQueryParameter("alpn").orEmpty()
+        val allowInsecure = uri.getQueryParameter("allowInsecure") == "1" ||
+            uri.getQueryParameter("insecure") == "1"
         val remark = decodeFragment(uri.fragment).ifBlank { "$host:$port" }
 
         return ProxyProfile(
@@ -122,6 +152,10 @@ object ConfigUriParser {
             transport = transport,
             security = security,
             path = path,
+            hostHeader = hostHeader,
+            fingerprint = fp,
+            alpn = alpn,
+            allowInsecure = allowInsecure,
             rawUri = rawUri,
             subscriptionSource = sub
         )

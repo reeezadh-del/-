@@ -71,6 +71,17 @@ object VpnRuntimeState {
         }
     }
 
+    fun setTrafficTotals(rxTotal: Long, txTotal: Long, rxSpeed: Long, txSpeed: Long) {
+        _telemetry.update {
+            it.copy(
+                rxBytes = rxTotal,
+                txBytes = txTotal,
+                rxSpeedBps = rxSpeed,
+                txSpeedBps = txSpeed
+            )
+        }
+    }
+
     fun incrementDnsQueries() {
         _telemetry.update { it.copy(dnsQueriesResolved = it.dnsQueriesResolved + 1) }
     }

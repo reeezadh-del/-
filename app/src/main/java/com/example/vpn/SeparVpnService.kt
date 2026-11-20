@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -19,16 +18,27 @@ import com.example.data.SettingsRepository
 import com.example.data.VpnRuntimeState
 import com.example.model.ConnectionState
 import com.example.model.VpnMode
+import io.nekohasekai.libbox.CommandClient
+import io.nekohasekai.libbox.CommandClientHandler
+import io.nekohasekai.libbox.CommandClientOptions
+import io.nekohasekai.libbox.CommandServer
+import io.nekohasekai.libbox.CommandServerHandler
+import io.nekohasekai.libbox.ConnectionEvents
+import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.LogIterator
+import io.nekohasekai.libbox.OutboundGroupIterator
+import io.nekohasekai.libbox.OverrideOptions
+import io.nekohasekai.libbox.ServiceStatusMessage
+import io.nekohasekai.libbox.SetupOptions
+import io.nekohasekai.libbox.StatusMessage
+import io.nekohasekai.libbox.StringIterator
+import io.nekohasekai.libbox.SystemProxyStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.io.File
 
 class SeparVpnService : VpnService() {
 
@@ -37,15 +47,17 @@ class SeparVpnService : VpnService() {
         const val ACTION_STOP = "com.example.vpn.ACTION_STOP"
         const val CHANNEL_ID = "separ_vpn_channel"
         private const val NOTIFICATION_ID = 1001
-        private const val TUN_ADDRESS = "10.120.0.2"
-        private const val TUN_DNS_SERVER = "10.120.0.1"
+
+        @Volatile
+        private var libboxInitialized = false
     }
 
-    private var serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var tunInterface: ParcelFileDescriptor? = null
-    private var localProxyServer: LocalProxyServer? = null
-    private var tunJob: Job? = null
-    private var statsJob: Job? = null
+    private var localSocksAntiDpiServer: LocalSocksAntiDpiServer? = null
+    private var commandServer: CommandServer? = null
+    private var commandClient: CommandClient? = null
+    private var latestBypassedPackages: Set<String> = emptySet()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -79,79 +91,83 @@ class SeparVpnService : VpnService() {
             cleanupTunnelResources()
 
             val settings = SettingsRepository(applicationContext).getSnapshot()
+            latestBypassedPackages = settings.bypassedPackages
             val selectedProfile = AppDatabase.getInstance(applicationContext)
                 .proxyProfileDao()
                 .getSelectedProfile()
 
             VpnRuntimeState.updateState(ConnectionState.Connecting, settings.vpnMode)
-            VpnRuntimeState.appendLog("VPN", "شروع اتصال در حالت: ${settings.vpnMode.titleFa}")
+            VpnRuntimeState.appendLog("VPN", "شروع هسته sing-box در حالت: ${settings.vpnMode.titleFa}")
 
-            val dohResolver = DohResolver(
-                vpnService = this,
-                dohEndpointUrl = settings.resolveActiveDnsUrl(),
-                bootstrapIp = settings.resolveBootstrapIp()
-            )
+            ensureLibboxSetup()
 
-            var localPort = 0
-            val activeProxy = if (settings.vpnMode == VpnMode.PROXY_CHAIN &&
-                selectedProfile != null && selectedProfile.protocol.supportsDirectTunnel
-            ) {
-                selectedProfile
-            } else {
-                null
-            }
-
-            if (settings.vpnMode == VpnMode.DPI_FRAGMENT_DOH || settings.vpnMode == VpnMode.PROXY_CHAIN) {
-                localProxyServer = LocalProxyServer(
+            var antiDpiSocksPort = 0
+            if (settings.vpnMode == VpnMode.DPI_FRAGMENT_DOH) {
+                val dohResolver = DohResolver(
+                    vpnService = this,
+                    dohEndpointUrl = settings.resolveActiveDnsUrl(),
+                    bootstrapIp = settings.resolveBootstrapIp()
+                )
+                localSocksAntiDpiServer = LocalSocksAntiDpiServer(
                     vpnService = this,
                     dohResolver = dohResolver,
                     tlsFragmentEnabled = settings.tlsFragmentEnabled,
                     fragmentSizeBytes = settings.fragmentSizeBytes,
-                    fragmentDelayMs = settings.fragmentDelayMs,
-                    upstreamProxy = activeProxy
+                    fragmentDelayMs = settings.fragmentDelayMs
                 )
-                localPort = localProxyServer?.start() ?: 0
+                antiDpiSocksPort = localSocksAntiDpiServer?.start() ?: 0
             }
 
-            val builder = Builder()
-                .setSession(getString(R.string.app_name))
-                .setMtu(1500)
-                .addAddress(TUN_ADDRESS, 32)
-                .addDnsServer(TUN_DNS_SERVER)
-                .addRoute(TUN_DNS_SERVER, 32)
-                .allowBypass()
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && localPort > 0) {
-                builder.setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", localPort))
+            if (settings.vpnMode == VpnMode.PROXY_CHAIN && selectedProfile == null) {
+                throw IllegalStateException("لطفاً ابتدا یک سرور (VLESS/VMess/Trojan/SS/SOCKS5) در تب سرورها انتخاب کنید")
             }
 
-            // Always exclude self to prevent socket loop
-            runCatching { builder.addDisallowedApplication(packageName) }
+            val configJson = SingBoxConfigBuilder.buildConfig(
+                settings = settings,
+                profile = selectedProfile,
+                localSocksAntiDpiPort = antiDpiSocksPort
+            )
 
-            // Exclude user-selected Iranian / bypassed apps
-            settings.bypassedPackages.forEach { pkg ->
-                runCatching { builder.addDisallowedApplication(pkg) }
+            Libbox.checkConfig(configJson)
+
+            val platformInterface = SeparPlatformInterface(
+                vpnService = this,
+                bypassedPackagesProvider = { latestBypassedPackages },
+                onTunOpened = { pfd -> tunInterface = pfd }
+            )
+
+            val server = Libbox.newCommandServer(serverHandler, platformInterface)
+            server.start()
+            commandServer = server
+
+            val overrideOptions = OverrideOptions().apply {
+                autoRedirect = false
             }
+            server.startOrReloadService(configJson, overrideOptions)
 
-            val pfd = builder.establish()
-                ?: throw IllegalStateException("امکان ایجاد رابط کاربری TUN وجود ندارد")
+            connectCommandClient()
 
-            tunInterface = pfd
+            val serverLabel = if (settings.vpnMode == VpnMode.PROXY_CHAIN && selectedProfile != null) {
+                "${selectedProfile.name} (${selectedProfile.protocol.displayName})"
+            } else {
+                null
+            }
 
             VpnRuntimeState.updateSessionInfo(
                 activeDnsLabel = settings.resolveActiveDnsLabel(),
-                localProxyPort = localPort,
-                activeServerLabel = activeProxy?.name ?: selectedProfile?.name
+                localProxyPort = antiDpiSocksPort,
+                activeServerLabel = serverLabel
             )
             VpnRuntimeState.updateState(ConnectionState.Connected, settings.vpnMode)
-            promoteToForeground(getString(R.string.notif_title_connected))
+            promoteToForeground(
+                if (serverLabel != null) "سپر نت متصل: $serverLabel"
+                else getString(R.string.notif_title_connected)
+            )
             VpnRuntimeState.appendLog(
                 "VPN",
-                "تونل برقرار شد (${settings.resolveActiveDnsLabel()} • استثنا: ${settings.bypassedPackages.size} برنامه)"
+                "تونل کامل دستگاه (0.0.0.0/0) برقرار شد" +
+                    if (serverLabel != null) " از طریق $serverLabel" else " (ضد فیلتر مستقیم)"
             )
-
-            startTunDnsLoop(pfd, dohResolver)
-            startSpeedTicker()
         } catch (e: Exception) {
             VpnRuntimeState.appendLog("VPN", "خطا: ${e.message}", isError = true)
             VpnRuntimeState.updateState(ConnectionState.Error(e.message ?: "خطا در برقراری تونل"))
@@ -161,63 +177,103 @@ class SeparVpnService : VpnService() {
         }
     }
 
-    private fun startTunDnsLoop(pfd: ParcelFileDescriptor, dohResolver: DohResolver) {
-        tunJob?.cancel()
-        tunJob = serviceScope.launch {
-            val input = FileInputStream(pfd.fileDescriptor)
-            val output = FileOutputStream(pfd.fileDescriptor)
-            val writeLock = Any()
-            val buffer = ByteArray(32767)
+    private fun ensureLibboxSetup() {
+        if (libboxInitialized) return
+        synchronized(Companion) {
+            if (libboxInitialized) return
+            val baseDir = File(filesDir, "singbox").apply { mkdirs() }
+            val workDir = File(baseDir, "work").apply { mkdirs() }
+            val tempDir = File(cacheDir, "singbox_tmp").apply { mkdirs() }
 
-            while (isActive) {
-                val length = try {
-                    input.read(buffer)
-                } catch (_: Exception) {
-                    -1
-                }
-                if (length <= 0) {
-                    if (length < 0) break
-                    continue
-                }
+            val options = SetupOptions().apply {
+                basePath = baseDir.absolutePath
+                workingPath = workDir.absolutePath
+                tempPath = tempDir.absolutePath
+                fixAndroidStack = true
+                logMaxLines = 200
+            }
+            Libbox.setup(options)
+            libboxInitialized = true
+        }
+    }
 
-                val packetCopy = buffer.copyOf(length)
-                val dnsReq = PacketUtils.parseUdpDnsPacket(packetCopy, length) ?: continue
-                VpnRuntimeState.addBytes(rxDelta = 0L, txDelta = length.toLong())
+    private fun connectCommandClient() {
+        val options = CommandClientOptions().apply {
+            addCommand(Libbox.CommandStatus)
+            addCommand(Libbox.CommandLog)
+            statusInterval = 1_000_000_000L // 1 second in nanoseconds
+        }
+        val client = Libbox.newCommandClient(clientHandler, options)
+        commandClient = client
+        serviceScope.launch {
+            runCatching { client.connect() }
+        }
+    }
 
-                launch {
-                    val queryName = PacketUtils.extractDnsQueryName(dnsReq.dnsPayload)
-                    val dnsResp = dohResolver.resolveWireDns(dnsReq.dnsPayload)
-                    if (dnsResp != null) {
-                        val responsePacket = PacketUtils.buildUdpDnsResponse(dnsReq, dnsResp)
-                        synchronized(writeLock) {
-                            runCatching {
-                                output.write(responsePacket)
-                                output.flush()
-                            }
-                        }
-                        VpnRuntimeState.addBytes(rxDelta = responsePacket.size.toLong(), txDelta = 0L)
-                        VpnRuntimeState.incrementDnsQueries()
-                        VpnRuntimeState.appendLog("DoH", "پاسخ امن DNS برای $queryName")
-                    }
-                }
+    private val serverHandler = object : CommandServerHandler {
+        override fun getSystemProxyStatus(): SystemProxyStatus =
+            SystemProxyStatus().apply {
+                available = false
+                enabled = false
+            }
+
+        override fun serviceReload() {}
+
+        override fun serviceStop() {
+            stopVpnTunnel()
+        }
+
+        override fun setSystemProxyEnabled(enabled: Boolean) {}
+
+        override fun writeDebugMessage(message: String) {
+            if (message.isNotBlank()) {
+                VpnRuntimeState.appendLog("Core", message)
             }
         }
     }
 
-    private fun startSpeedTicker() {
-        statsJob?.cancel()
-        statsJob = serviceScope.launch {
-            var prevRx = VpnRuntimeState.telemetry.value.rxBytes
-            var prevTx = VpnRuntimeState.telemetry.value.txBytes
-            while (isActive) {
-                delay(1000L)
-                val snap = VpnRuntimeState.telemetry.value
-                val rxRate = (snap.rxBytes - prevRx).coerceAtLeast(0L)
-                val txRate = (snap.txBytes - prevTx).coerceAtLeast(0L)
-                prevRx = snap.rxBytes
-                prevTx = snap.txBytes
-                VpnRuntimeState.updateSpeeds(rxRate, txRate)
+    private val clientHandler = object : CommandClientHandler {
+        override fun clearLogs() {}
+
+        override fun connected() {}
+
+        override fun disconnected(message: String?) {
+            if (!message.isNullOrBlank()) {
+                VpnRuntimeState.appendLog("Core", message, isError = true)
             }
+        }
+
+        override fun initializeClashMode(modeList: StringIterator?, currentMode: String?) {}
+
+        override fun setDefaultLogLevel(level: Int) {}
+
+        override fun updateClashMode(newMode: String?) {}
+
+        override fun writeConnectionEvents(events: ConnectionEvents?) {}
+
+        override fun writeGroups(groups: OutboundGroupIterator?) {}
+
+        override fun writeLogs(messageList: LogIterator?) {
+            if (messageList == null) return
+            while (messageList.hasNext()) {
+                val entry = messageList.next()
+                val msg = entry.message
+                if (msg.isNotBlank()) {
+                    VpnRuntimeState.appendLog("sing-box", msg, isError = entry.level <= 2)
+                }
+            }
+        }
+
+        override fun writeServiceStatus(message: ServiceStatusMessage?) {}
+
+        override fun writeStatus(message: StatusMessage?) {
+            if (message == null) return
+            VpnRuntimeState.setTrafficTotals(
+                rxTotal = message.downlinkTotal,
+                txTotal = message.uplinkTotal,
+                rxSpeed = message.downlink,
+                txSpeed = message.uplink
+            )
         }
     }
 
@@ -231,12 +287,13 @@ class SeparVpnService : VpnService() {
     }
 
     private fun cleanupTunnelResources() {
-        tunJob?.cancel()
-        tunJob = null
-        statsJob?.cancel()
-        statsJob = null
-        runCatching { localProxyServer?.stop() }
-        localProxyServer = null
+        runCatching { commandClient?.disconnect() }
+        commandClient = null
+        runCatching { commandServer?.closeService() }
+        runCatching { commandServer?.close() }
+        commandServer = null
+        runCatching { localSocksAntiDpiServer?.stop() }
+        localSocksAntiDpiServer = null
         runCatching { tunInterface?.close() }
         tunInterface = null
     }

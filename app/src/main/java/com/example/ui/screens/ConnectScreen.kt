@@ -31,11 +31,14 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -83,6 +86,7 @@ fun ConnectScreen(
     onSelectMode: (VpnMode) -> Unit,
     onOpenProfiles: () -> Unit,
     onOpenTools: () -> Unit,
+    onCheckExitIp: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -277,6 +281,100 @@ fun ConnectScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Real Exit IP & Location Verification Card
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                borderColor = if (uiState.selectedProfile == null && uiState.settings.vpnMode != VpnMode.PROXY_CHAIN) {
+                    SaffronAmber.copy(alpha = 0.45f)
+                } else {
+                    ObsidianCardBorder
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "آی‌پی و موقعیت فعلی خروج",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = TextPrimary
+                        )
+                        val ipInfo = uiState.exitIpInfo
+                        if (ipInfo != null) {
+                            LtrText(
+                                text = "${ipInfo.ip}  •  ${ipInfo.country} (${ipInfo.countryCode})",
+                                color = if (ipInfo.countryCode.equals("IR", ignoreCase = true)) SaffronAmber else EmeraldPrimary,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                            if (ipInfo.isp.isNotBlank()) {
+                                LtrText(
+                                    text = ipInfo.isp,
+                                    color = TextMuted,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "برای اطمینان از تغییر کشور و IP روی دکمه بررسی بزنید",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    OutlinedButton(
+                        onClick = onCheckExitIp,
+                        enabled = !uiState.isCheckingExitIp,
+                        border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("check_exit_ip_button")
+                    ) {
+                        if (uiState.isCheckingExitIp) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = EmeraldPrimary
+                            )
+                        } else {
+                            Text("بررسی IP", color = EmeraldPrimary)
+                        }
+                    }
+                }
+
+                if (uiState.selectedProfile == null || uiState.settings.vpnMode != VpnMode.PROXY_CHAIN) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ObsidianSurfaceElevated)
+                            .clickable(onClick = onOpenProfiles)
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = null,
+                            tint = SaffronAmber,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "بدون انتخاب سرور خارجی، آی‌پی و لوکیشن ایران باقی می‌ماند. برای تغییر لوکیشن و باز کردن تمام سایت‌های فیلتر، یک لینک VLESS / VMess / Trojan / SS / SOCKS5 در تب «سرورها» اضافه کنید.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SaffronAmber
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // 2x2 Live Telemetry Grid
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -387,7 +485,7 @@ fun ConnectScreen(
                             )
                             Text(
                                 text = if (proxyWarning) {
-                                    "نیازمند انتخاب سرور SOCKS5 یا HTTP در تب سرورها (در غیر این صورت حالت مستقیم اجرا می‌شود)"
+                                    "ابتدا یک سرور VLESS / VMess / Trojan / SS / SOCKS5 از تب «سرورها» انتخاب کنید"
                                 } else {
                                     mode.subtitleFa
                                 },

@@ -254,7 +254,8 @@ fun SeparNetAppRoot(
                                 onToggleConnection = onToggleConnection,
                                 onSelectMode = viewModel::setVpnMode,
                                 onOpenProfiles = { navigateToTab(NavTab.Profiles) },
-                                onOpenTools = { navigateToTab(NavTab.Tools) }
+                                onOpenTools = { navigateToTab(NavTab.Tools) },
+                                onCheckExitIp = viewModel::checkExitIp
                             )
                         }
                         composable(NavTab.Profiles.route) {

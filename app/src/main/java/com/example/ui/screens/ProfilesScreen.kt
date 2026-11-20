@@ -107,7 +107,7 @@ fun ProfilesScreen(
                 color = TextPrimary
             )
             Text(
-                text = "پشتیبانی از SOCKS5، HTTP و وارد کردن لینک‌های VLESS / VMess / Trojan / SS و اشتراک",
+                text = "تونل کامل دستگاه با پشتیبانی از VLESS (TLS/REALITY)، VMess، Trojan، Shadowsocks، SOCKS5 و لینک اشتراک",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
@@ -353,15 +353,15 @@ private fun ProfileCard(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val badgeText = if (profile.protocol.supportsDirectTunnel) {
-                        "تونل مستقیم در اپ"
-                    } else {
-                        "پروفایل Xray (${profile.transport}/${profile.security})"
+                    val details = buildString {
+                        append("تونل کامل (${profile.transport}")
+                        if (profile.security != "none") append("/${profile.security}")
+                        append(")")
                     }
                     Text(
-                        text = badgeText,
+                        text = details,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (profile.protocol.supportsDirectTunnel) EmeraldPrimary else TextMuted
+                        color = EmeraldPrimary
                     )
                 }
             }

@@ -94,6 +94,52 @@ object NetworkProbe {
             }
         }
 
+    data class ExitIpInfo(
+        val ip: String,
+        val country: String,
+        val countryCode: String,
+        val isp: String
+    )
+
+    suspend fun checkExitIp(viaSingBoxProxy: Boolean): Result<ExitIpInfo> =
+        withContext(Dispatchers.IO) {
+            try {
+                val client = if (viaSingBoxProxy) {
+                    httpClient.newBuilder()
+                        .proxy(
+                            java.net.Proxy(
+                                java.net.Proxy.Type.HTTP,
+                                InetSocketAddress("127.0.0.1", 10808)
+                            )
+                        )
+                        .build()
+                } else {
+                    httpClient
+                }
+                val request = Request.Builder()
+                    .url("https://ipwho.is/")
+                    .header("User-Agent", "SeparNet/1.0")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    val json = org.json.JSONObject(raw)
+                    if (!response.isSuccessful || !json.optBoolean("success", true)) {
+                        return@withContext Result.failure(IllegalStateException("عدم دسترسی به سرویس بررسی IP"))
+                    }
+                    Result.success(
+                        ExitIpInfo(
+                            ip = json.optString("ip", "Unknown"),
+                            country = json.optString("country", "Unknown"),
+                            countryCode = json.optString("country_code", ""),
+                            isp = json.optJSONObject("connection")?.optString("isp").orEmpty()
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
     fun defaultCleanScanTargets(): List<ScanEndpointResult> = listOf(
         ScanEndpointResult("Cloudflare Anycast #1", "104.16.132.229", 443, "Cloudflare IP"),
         ScanEndpointResult("Cloudflare Anycast #2", "162.159.192.1", 443, "Cloudflare IP"),
