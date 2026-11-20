@@ -108,6 +108,11 @@ class ExampleRobolectricTest {
         )
         val parsedProxy = org.json.JSONObject(proxyJson)
         assertEquals("proxy", parsedProxy.getJSONObject("route").getString("final"))
+        assertEquals("sniff", parsedProxy.getJSONObject("route").getJSONArray("rules").getJSONObject(0).getString("action"))
+        assertEquals(2, parsedProxy.getJSONArray("inbounds").getJSONObject(0).getJSONArray("address").length())
+        val dnsServers = parsedProxy.getJSONObject("dns").getJSONArray("servers")
+        assertEquals("https://1.1.1.1/dns-query", dnsServers.getJSONObject(0).getString("address"))
+        assertEquals("local", dnsServers.getJSONObject(1).getString("address"))
         val outbounds = parsedProxy.getJSONArray("outbounds")
         val vlessOutbound = outbounds.getJSONObject(0)
         assertEquals("vless", vlessOutbound.getString("type"))
@@ -125,6 +130,10 @@ class ExampleRobolectricTest {
         )
         val dpiParsed = org.json.JSONObject(dpiJson)
         assertEquals("anti-dpi-socks", dpiParsed.getJSONObject("route").getString("final"))
+        assertEquals(
+            "anti-dpi-socks",
+            dpiParsed.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("detour")
+        )
 
         val vlessTlsWs = ConfigUriParser.parseSingle(
             "vless://44444444-4444-4444-4444-444444444444@cdn.example.com:443?security=tls&sni=cdn.example.com&type=ws&path=/ws#CloudflareTls"

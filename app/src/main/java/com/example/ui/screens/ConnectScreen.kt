@@ -348,27 +348,39 @@ fun ConnectScreen(
 
                 if (uiState.selectedProfile == null || uiState.settings.vpnMode != VpnMode.PROXY_CHAIN) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(ObsidianSurfaceElevated)
                             .clickable(onClick = onOpenProfiles)
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Info,
-                            contentDescription = null,
-                            tint = SaffronAmber,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "بدون انتخاب سرور خارجی، آی‌پی و لوکیشن ایران باقی می‌ماند. برای تغییر لوکیشن و باز کردن تمام سایت‌های فیلتر، یک لینک VLESS / VMess / Trojan / SS / SOCKS5 در تب «سرورها» اضافه کنید.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = SaffronAmber
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = SaffronAmber,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "سرور خارجی انتخاب نشده است — در حالت فعلی لوکیشن ایران باقی می‌ماند و سایت‌های دارای مسدودیت IP باز نمی‌شوند.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SaffronAmber
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onOpenProfiles,
+                            border = BorderStroke(1.dp, SaffronAmber.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("go_to_servers_cta")
+                        ) {
+                            Text("افزودن یا انتخاب سرور خارجی (VLESS / VMess / Trojan)", color = SaffronAmber)
+                        }
                     }
                 }
             }

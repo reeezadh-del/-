@@ -68,11 +68,9 @@ class SeparPlatformInterface(
         }
 
         if (options.autoRoute) {
-            runCatching {
-                options.dnsServerAddress?.value?.let { dnsAddr ->
-                    if (dnsAddr.isNotBlank()) builder.addDnsServer(dnsAddr)
-                }
-            }
+            val dnsServer = runCatching { options.dnsServerAddress?.value }.getOrNull()
+                ?.takeIf { it.isNotBlank() } ?: "172.19.0.2"
+            runCatching { builder.addDnsServer(dnsServer) }
 
             var addedIpv4Route = false
             val inet4Routes = options.inet4RouteAddress
@@ -93,10 +91,19 @@ class SeparPlatformInterface(
                 builder.addRoute("0.0.0.0", 0)
             }
 
+            var addedIpv6Route = false
             val inet6Routes = options.inet6RouteAddress
             while (inet6Routes.hasNext()) {
                 val route = inet6Routes.next()
                 builder.addRoute(route.address(), route.prefix())
+                addedIpv6Route = true
+            }
+            if (!addedIpv6Route) {
+                val ranges6 = options.inet6RouteRange
+                while (ranges6.hasNext()) {
+                    val range = ranges6.next()
+                    builder.addRoute(range.address(), range.prefix())
+                }
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -126,7 +133,7 @@ class SeparPlatformInterface(
         }
 
         val pfd = builder.establish()
-            ?: throw IllegalStateException("امکان ایجاد رابط کاربری TUN وجود ندارد")
+            ?: throw IllegalStateException("امکان ایجاد رابط TUN وجود ندارد")
         onTunOpened(pfd)
         return pfd.fd
     }
@@ -174,15 +181,39 @@ class SeparPlatformInterface(
             }
 
             override fun onLost(network: Network) {
-                listener.updateDefaultInterface("", -1, false, false)
+                val remaining = findActivePhysicalNetwork()
+                if (remaining != null) {
+                    updateListener(remaining, listener)
+                } else {
+                    listener.updateDefaultInterface("", -1, false, false)
+                }
             }
         }
         networkCallback = callback
         runCatching { connectivityManager.registerNetworkCallback(request, callback) }
 
+        findActivePhysicalNetwork()?.let { active ->
+            updateListener(active, listener)
+        }
+    }
+
+    private fun findActivePhysicalNetwork(): Network? {
         val active = connectivityManager.activeNetwork
         if (active != null) {
-            updateListener(active, listener)
+            val caps = connectivityManager.getNetworkCapabilities(active)
+            if (caps != null &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            ) {
+                return active
+            }
+        }
+        @Suppress("DEPRECATION")
+        return connectivityManager.allNetworks.firstOrNull { net ->
+            val caps = connectivityManager.getNetworkCapabilities(net)
+            caps != null &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
         }
     }
 
@@ -194,7 +225,9 @@ class SeparPlatformInterface(
         runCatching {
             val linkProps = lp ?: connectivityManager.getLinkProperties(network) ?: return
             val ifaceName = linkProps.interfaceName ?: return
-            val ifaceIndex = JavaNetworkInterface.getByName(ifaceName)?.index ?: -1
+            val ifaceIndex = runCatching {
+                JavaNetworkInterface.getByName(ifaceName)?.index
+            }.getOrNull() ?: 1
             val caps = connectivityManager.getNetworkCapabilities(network)
             val isExpensive = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
             listener.updateDefaultInterface(ifaceName, ifaceIndex, isExpensive, false)
@@ -210,11 +243,50 @@ class SeparPlatformInterface(
 
     override fun getInterfaces(): NetworkInterfaceIterator {
         val result = mutableListOf<NetworkInterface>()
+        val seenNames = mutableSetOf<String>()
+
+        // Primary: ConnectivityManager LinkProperties (reliable on Android 11+ where Netlink is restricted)
+        runCatching {
+            @Suppress("DEPRECATION")
+            connectivityManager.allNetworks.forEach { net ->
+                val caps = connectivityManager.getNetworkCapabilities(net) ?: return@forEach
+                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return@forEach
+                val lp = connectivityManager.getLinkProperties(net) ?: return@forEach
+                val name = lp.interfaceName ?: return@forEach
+                if (!seenNames.add(name)) return@forEach
+                val addrs = lp.linkAddresses.mapNotNull { la ->
+                    val host = la.address?.hostAddress?.substringBefore('%') ?: return@mapNotNull null
+                    "$host/${la.prefixLength}"
+                }
+                if (addrs.isEmpty()) return@forEach
+                val dnsList = lp.dnsServers.mapNotNull { it.hostAddress?.substringBefore('%') }
+                val ifaceIndex = runCatching { JavaNetworkInterface.getByName(name)?.index }.getOrNull() ?: (result.size + 1)
+
+                val libIface = NetworkInterface().apply {
+                    index = ifaceIndex
+                    mtu = if (lp.mtu > 0) lp.mtu else 1500
+                    this.name = name
+                    addresses = ListStringIterator(addrs)
+                    flags = 65 // IFF_UP | IFF_RUNNING
+                    dnsServer = ListStringIterator(dnsList)
+                    metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+                    type = when {
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> Libbox.InterfaceTypeWIFI
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> Libbox.InterfaceTypeCellular
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
+                        else -> Libbox.InterfaceTypeOther
+                    }
+                }
+                result.add(libIface)
+            }
+        }
+
+        // Secondary fallback via Java NetworkInterface
         runCatching {
             val enumIfaces = JavaNetworkInterface.getNetworkInterfaces()
-            while (enumIfaces.hasMoreElements()) {
+            while (enumIfaces != null && enumIfaces.hasMoreElements()) {
                 val nif = enumIfaces.nextElement()
-                if (nif.isLoopback) continue
+                if (nif.isLoopback || nif.name in seenNames) continue
                 val addrs = nif.interfaceAddresses.mapNotNull { ia ->
                     val host = ia.address?.hostAddress?.substringBefore('%') ?: return@mapNotNull null
                     "$host/${ia.networkPrefixLength}"
@@ -226,6 +298,7 @@ class SeparPlatformInterface(
                     mtu = runCatching { nif.mtu }.getOrDefault(1500)
                     name = nif.name
                     addresses = ListStringIterator(addrs)
+                    flags = 65
                     type = when {
                         nif.name.startsWith("wlan") -> Libbox.InterfaceTypeWIFI
                         nif.name.startsWith("rmnet") || nif.name.startsWith("ccmni") -> Libbox.InterfaceTypeCellular
@@ -236,6 +309,7 @@ class SeparPlatformInterface(
                 result.add(libIface)
             }
         }
+
         return object : NetworkInterfaceIterator {
             private var idx = 0
             override fun hasNext(): Boolean = idx < result.size
@@ -251,7 +325,39 @@ class SeparPlatformInterface(
 
     override fun readWIFIState(): WIFIState? = null
 
-    override fun localDNSTransport(): LocalDNSTransport? = null
+    override fun localDNSTransport(): LocalDNSTransport = object : LocalDNSTransport {
+        override fun raw(): Boolean = false
+
+        override fun exchange(ctx: io.nekohasekai.libbox.ExchangeContext, message: ByteArray) {
+            ctx.errnoCode(1)
+        }
+
+        override fun lookup(ctx: io.nekohasekai.libbox.ExchangeContext, network: String, domain: String) {
+            try {
+                val physicalNet = findActivePhysicalNetwork()
+                val addresses = if (physicalNet != null) {
+                    physicalNet.getAllByName(domain).toList()
+                } else {
+                    InetAddress.getAllByName(domain).toList()
+                }
+                val filtered = when (network.lowercase()) {
+                    "ip4" -> addresses.filterIsInstance<java.net.Inet4Address>()
+                    "ip6" -> addresses.filterIsInstance<java.net.Inet6Address>()
+                    else -> addresses
+                }
+                val joined = filtered.mapNotNull { it.hostAddress?.substringBefore('%') }
+                    .distinct()
+                    .joinToString("\n")
+                if (joined.isNotBlank()) {
+                    ctx.success(joined)
+                } else {
+                    ctx.errnoCode(2)
+                }
+            } catch (_: Exception) {
+                ctx.errnoCode(1)
+            }
+        }
+    }
 
     override fun systemCertificates(): StringIterator? = null
 

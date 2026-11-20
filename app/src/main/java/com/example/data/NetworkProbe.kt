@@ -101,37 +101,98 @@ object NetworkProbe {
         val isp: String
     )
 
+    suspend fun verifyTunnelReachability(): Result<ExitIpInfo> = checkExitIp(viaSingBoxProxy = true)
+
     suspend fun checkExitIp(viaSingBoxProxy: Boolean): Result<ExitIpInfo> =
         withContext(Dispatchers.IO) {
-            try {
-                val client = if (viaSingBoxProxy) {
-                    httpClient.newBuilder()
-                        .proxy(
-                            java.net.Proxy(
-                                java.net.Proxy.Type.HTTP,
-                                InetSocketAddress("127.0.0.1", 10808)
-                            )
+            val client = if (viaSingBoxProxy) {
+                OkHttpClient.Builder()
+                    .connectTimeout(7, TimeUnit.SECONDS)
+                    .readTimeout(8, TimeUnit.SECONDS)
+                    .proxy(
+                        java.net.Proxy(
+                            java.net.Proxy.Type.HTTP,
+                            InetSocketAddress("127.0.0.1", 10808)
                         )
-                        .build()
-                } else {
-                    httpClient
-                }
-                val request = Request.Builder()
+                    )
+                    .build()
+            } else {
+                httpClient
+            }
+
+            // Try ipwho.is first, then ipinfo.io, then Cloudflare trace as reliable fallback
+            runCatching {
+                val req = Request.Builder()
                     .url("https://ipwho.is/")
                     .header("User-Agent", "SeparNet/1.0")
                     .build()
-                client.newCall(request).execute().use { response ->
+                client.newCall(req).execute().use { response ->
                     val raw = response.body?.string().orEmpty()
                     val json = org.json.JSONObject(raw)
-                    if (!response.isSuccessful || !json.optBoolean("success", true)) {
-                        return@withContext Result.failure(IllegalStateException("عدم دسترسی به سرویس بررسی IP"))
+                    if (response.isSuccessful && json.optBoolean("success", true) && json.optString("ip").isNotBlank()) {
+                        return@withContext Result.success(
+                            ExitIpInfo(
+                                ip = json.optString("ip", "Unknown"),
+                                country = json.optString("country", "Unknown"),
+                                countryCode = json.optString("country_code", ""),
+                                isp = json.optJSONObject("connection")?.optString("isp").orEmpty()
+                            )
+                        )
                     }
+                }
+            }
+
+            runCatching {
+                val req = Request.Builder()
+                    .url("https://ipinfo.io/json")
+                    .header("User-Agent", "SeparNet/1.0")
+                    .build()
+                client.newCall(req).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    val json = org.json.JSONObject(raw)
+                    val ip = json.optString("ip")
+                    if (response.isSuccessful && ip.isNotBlank()) {
+                        val countryCode = json.optString("country", "")
+                        return@withContext Result.success(
+                            ExitIpInfo(
+                                ip = ip,
+                                country = countryCode.ifBlank { "Unknown" },
+                                countryCode = countryCode,
+                                isp = json.optString("org", "")
+                            )
+                        )
+                    }
+                }
+            }
+
+            return@withContext try {
+                val req = Request.Builder()
+                    .url("https://1.1.1.1/cdn-cgi/trace")
+                    .header("User-Agent", "SeparNet/1.0")
+                    .build()
+                client.newCall(req).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    if (!response.isSuccessful || raw.isBlank()) {
+                        return@withContext Result.failure(
+                            IllegalStateException("عدم عبور ترافیک از تونل (HTTP ${response.code})")
+                        )
+                    }
+                    val map = raw.lineSequence()
+                        .mapNotNull { line ->
+                            val idx = line.indexOf('=')
+                            if (idx > 0) line.substring(0, idx) to line.substring(idx + 1) else null
+                        }
+                        .toMap()
+                    val ip = map["ip"] ?: return@withContext Result.failure(
+                        IllegalStateException("پاسخ معتبر از تونل دریافت نشد")
+                    )
+                    val loc = map["loc"].orEmpty()
                     Result.success(
                         ExitIpInfo(
-                            ip = json.optString("ip", "Unknown"),
-                            country = json.optString("country", "Unknown"),
-                            countryCode = json.optString("country_code", ""),
-                            isp = json.optJSONObject("connection")?.optString("isp").orEmpty()
+                            ip = ip,
+                            country = loc.ifBlank { "Unknown" },
+                            countryCode = loc,
+                            isp = "Cloudflare Edge"
                         )
                     )
                 }

@@ -6,8 +6,8 @@ enum class VpnMode(val titleFa: String, val subtitleFa: String) {
         subtitleFa = "عبور مستقیم از فیلترینگ SNI و DNS بدون نیاز به سرور خارجی"
     ),
     PROXY_CHAIN(
-        titleFa = "تونل از طریق پروفایل پروکسی + DoH",
-        subtitleFa = "ارسال ترافیک از طریق سرور SOCKS5/HTTP انتخاب‌شده با DNS رمزنگاری‌شده"
+        titleFa = "تونل کامل سرور خارجی + DoH",
+        subtitleFa = "ارسال تمام ترافیک دستگاه از طریق سرور VLESS / VMess / Trojan / SS / SOCKS5"
     ),
     DOH_ONLY(
         titleFa = "فقط DNS رمزنگاری‌شده (ضد مسمومیت DNS)",
@@ -50,28 +50,28 @@ data class DnsPreset(
             DnsPreset(
                 id = "cloudflare",
                 nameFa = "Cloudflare (کلادفلر)",
-                dohUrl = "https://cloudflare-dns.com/dns-query",
+                dohUrl = "https://1.1.1.1/dns-query",
                 bootstrapIp = "1.1.1.1",
-                descriptionFa = "سریع، پایدار و مقاوم در برابر مسمومیت DNS"
+                descriptionFa = "سریع، بدون نیاز به DNS اولیه و مقاوم در برابر مسمومیت"
             ),
             DnsPreset(
                 id = "google",
                 nameFa = "Google DoH (گوگل)",
-                dohUrl = "https://dns.google/dns-query",
+                dohUrl = "https://8.8.8.8/dns-query",
                 bootstrapIp = "8.8.8.8",
                 descriptionFa = "پایداری بالا روی اغلب اپراتورهای ایران"
             ),
             DnsPreset(
                 id = "quad9",
                 nameFa = "Quad9 Security",
-                dohUrl = "https://dns.quad9.net/dns-query",
+                dohUrl = "https://9.9.9.9/dns-query",
                 bootstrapIp = "9.9.9.9",
                 descriptionFa = "مسدودسازی دامنه‌های مخرب و فیشینگ"
             ),
             DnsPreset(
                 id = "adguard",
                 nameFa = "AdGuard DNS",
-                dohUrl = "https://dns.adguard-dns.com/dns-query",
+                dohUrl = "https://94.140.14.14/dns-query",
                 bootstrapIp = "94.140.14.14",
                 descriptionFa = "حذف تبلیغات و ردیاب‌ها به صورت رمزنگاری‌شده"
             ),

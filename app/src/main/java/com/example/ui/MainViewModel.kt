@@ -62,7 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isTestingProfiles = MutableStateFlow(false)
     private val _isImportingSub = MutableStateFlow(false)
     private val _bannerMessage = MutableStateFlow<String?>(null)
-    private val _exitIpInfo = MutableStateFlow<NetworkProbe.ExitIpInfo?>(null)
+    private val _manualExitIpInfo = MutableStateFlow<NetworkProbe.ExitIpInfo?>(null)
     private val _isCheckingExitIp = MutableStateFlow(false)
 
     private val baseDataFlow = combine(
@@ -75,8 +75,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BaseSnapshot(telemetry, settings, profiles, selectedProfile, logs)
     }
 
-    private val ipStateFlow = combine(_exitIpInfo, _isCheckingExitIp) { info, checking ->
-        info to checking
+    private val ipStateFlow = combine(
+        VpnRuntimeState.exitIpInfo,
+        _manualExitIpInfo,
+        _isCheckingExitIp
+    ) { runtimeIp, manualIp, checking ->
+        (runtimeIp ?: manualIp) to checking
     }
 
     private val auxStateFlow = combine(
@@ -312,7 +316,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = NetworkProbe.checkExitIp(viaSingBoxProxy = isConnected)
             _isCheckingExitIp.value = false
             result.fold(
-                onSuccess = { _exitIpInfo.value = it },
+                onSuccess = {
+                    _manualExitIpInfo.value = it
+                    if (isConnected) {
+                        VpnRuntimeState.setExitIpInfo(it)
+                    }
+                },
                 onFailure = { showBanner("خطا در بررسی IP خروج: ${it.message ?: "نامشخص"}") }
             )
         }

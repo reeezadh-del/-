@@ -18,7 +18,17 @@ object VpnRuntimeState {
     private val _logs = MutableStateFlow<List<TunnelLogEntry>>(emptyList())
     val logs: StateFlow<List<TunnelLogEntry>> = _logs.asStateFlow()
 
+    private val _exitIpInfo = MutableStateFlow<NetworkProbe.ExitIpInfo?>(null)
+    val exitIpInfo: StateFlow<NetworkProbe.ExitIpInfo?> = _exitIpInfo.asStateFlow()
+
+    fun setExitIpInfo(info: NetworkProbe.ExitIpInfo?) {
+        _exitIpInfo.value = info
+    }
+
     fun updateState(state: ConnectionState, mode: VpnMode? = null) {
+        if (state == ConnectionState.Disconnected || state is ConnectionState.Error) {
+            _exitIpInfo.value = null
+        }
         _telemetry.update { current ->
             val resetTimes = state == ConnectionState.Disconnected || state is ConnectionState.Error
             current.copy(
@@ -37,7 +47,8 @@ object VpnRuntimeState {
                 txSpeedBps = if (resetTimes) 0L else current.txSpeedBps,
                 dnsQueriesResolved = if (resetTimes) 0 else current.dnsQueriesResolved,
                 fragmentedConnections = if (resetTimes) 0 else current.fragmentedConnections,
-                localProxyPort = if (resetTimes) 0 else current.localProxyPort
+                localProxyPort = if (resetTimes) 0 else current.localProxyPort,
+                activeServerLabel = if (resetTimes) null else current.activeServerLabel
             )
         }
     }

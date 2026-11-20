@@ -33,30 +33,33 @@ object SingBoxConfigBuilder {
 
         // 2. DNS
         val dohUrl = settings.resolveActiveDnsUrl()
-        val bootstrapIp = settings.resolveBootstrapIp()
+        val dnsDetour = when {
+            useRemoteProxy -> "proxy"
+            useLocalAntiDpiSocks -> "anti-dpi-socks"
+            else -> "direct"
+        }
         val dnsServers = JSONArray().apply {
-            // Remote encrypted DoH routed through the main outbound (proxy or direct)
             put(JSONObject().apply {
                 put("tag", "dns-remote")
                 put("address", dohUrl)
-                put("address_resolver", "dns-bootstrap")
-                put("detour", if (useRemoteProxy) "proxy" else "direct")
+                put("address_resolver", "dns-local")
+                put("detour", dnsDetour)
             })
-            // Bootstrap/direct DNS for resolving proxy server hostname & .ir domains
+            // Local Android physical network DNS (avoids Iran plain UDP 53 1.1.1.1 hijacking)
             put(JSONObject().apply {
-                put("tag", "dns-bootstrap")
-                put("address", bootstrapIp)
+                put("tag", "dns-local")
+                put("address", "local")
                 put("detour", "direct")
             })
         }
         val dnsRules = JSONArray().apply {
             put(JSONObject().apply {
                 put("outbound", JSONArray().put("any"))
-                put("server", "dns-bootstrap")
+                put("server", "dns-local")
             })
             put(JSONObject().apply {
                 put("domain_suffix", JSONArray().put(".ir"))
-                put("server", "dns-bootstrap")
+                put("server", "dns-local")
             })
         }
         root.put("dns", JSONObject().apply {
@@ -66,19 +69,20 @@ object SingBoxConfigBuilder {
             put("strategy", "ipv4_only")
         })
 
-        // 3. Inbounds (Full-device TUN)
+        // 3. Inbounds (Full-device dual-stack TUN + internal mixed proxy for exit-IP check)
         val inbounds = JSONArray().apply {
             put(JSONObject().apply {
                 put("type", "tun")
                 put("tag", "tun-in")
                 put("interface_name", "tun0")
-                put("address", JSONArray().put("172.19.0.1/30"))
+                put("address", JSONArray().apply {
+                    put("172.19.0.1/30")
+                    put("fdfe:dcba:9876::1/126")
+                })
                 put("mtu", 1500)
                 put("auto_route", true)
                 put("strict_route", true)
                 put("stack", "gvisor")
-                put("sniff", true)
-                put("sniff_override_destination", true)
             })
             put(JSONObject().apply {
                 put("type", "mixed")
@@ -113,8 +117,11 @@ object SingBoxConfigBuilder {
         })
         root.put("outbounds", outbounds)
 
-        // 5. Route
+        // 5. Route (sing-box 1.12 rule actions)
         val routeRules = JSONArray().apply {
+            put(JSONObject().apply {
+                put("action", "sniff")
+            })
             put(JSONObject().apply {
                 put("protocol", "dns")
                 put("action", "hijack-dns")
@@ -136,7 +143,6 @@ object SingBoxConfigBuilder {
                 })
             }
             if (useRemoteProxy) {
-                // Keep .ir domains direct when using remote proxy unless user wants full proxy
                 put(JSONObject().apply {
                     put("domain_suffix", JSONArray().put(".ir"))
                     put("outbound", "direct")
@@ -217,12 +223,11 @@ object SingBoxConfigBuilder {
                     }
                     if (alpnArr.length() > 0) put("alpn", alpnArr)
                 }
-                if (profile.fingerprint.isNotBlank()) {
-                    put("utls", JSONObject().apply {
-                        put("enabled", true)
-                        put("fingerprint", profile.fingerprint)
-                    })
-                }
+                val fp = profile.fingerprint.ifBlank { "chrome" }
+                put("utls", JSONObject().apply {
+                    put("enabled", true)
+                    put("fingerprint", fp)
+                })
                 if (sec == "reality" && profile.realityPublicKey.isNotBlank()) {
                     put("reality", JSONObject().apply {
                         put("enabled", true)
@@ -264,6 +269,16 @@ object SingBoxConfigBuilder {
                     put("path", profile.path.ifBlank { "/" })
                     val hostHeader = profile.hostHeader.ifBlank { profile.sni }
                     if (hostHeader.isNotBlank()) put("host", hostHeader)
+                })
+            }
+            "http", "h2" -> {
+                obj.put("transport", JSONObject().apply {
+                    put("type", "http")
+                    put("path", profile.path.ifBlank { "/" })
+                    val hostHeader = profile.hostHeader.ifBlank { profile.sni }
+                    if (hostHeader.isNotBlank()) {
+                        put("host", JSONArray().put(hostHeader))
+                    }
                 })
             }
         }

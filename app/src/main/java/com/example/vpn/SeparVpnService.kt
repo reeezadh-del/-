@@ -92,38 +92,49 @@ class SeparVpnService : VpnService() {
 
             val settings = SettingsRepository(applicationContext).getSnapshot()
             latestBypassedPackages = settings.bypassedPackages
-            val selectedProfile = AppDatabase.getInstance(applicationContext)
-                .proxyProfileDao()
-                .getSelectedProfile()
+            var effectiveMode = settings.vpnMode
+            val dao = AppDatabase.getInstance(applicationContext).proxyProfileDao()
+            var selectedProfile = dao.getSelectedProfile()
 
-            VpnRuntimeState.updateState(ConnectionState.Connecting, settings.vpnMode)
-            VpnRuntimeState.appendLog("VPN", "شروع هسته sing-box در حالت: ${settings.vpnMode.titleFa}")
+            if (selectedProfile == null) {
+                val firstSaved = dao.getAllProfilesOnce().firstOrNull()
+                if (firstSaved != null) {
+                    dao.selectProfile(firstSaved.id)
+                    selectedProfile = firstSaved.copy(isSelected = true)
+                    effectiveMode = VpnMode.PROXY_CHAIN
+                    SettingsRepository(applicationContext).setVpnMode(VpnMode.PROXY_CHAIN)
+                }
+            }
+
+            if (effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile == null) {
+                throw IllegalStateException("هیچ سروری انتخاب نشده است؛ ابتدا از تب «سرورها» یک کانفیگ VLESS / VMess / Trojan / SS / SOCKS5 اضافه کنید")
+            }
+
+            val effectiveSettings = settings.copy(vpnMode = effectiveMode)
+            VpnRuntimeState.updateState(ConnectionState.Connecting, effectiveMode)
+            VpnRuntimeState.appendLog("VPN", "شروع هسته sing-box در حالت: ${effectiveMode.titleFa}")
 
             ensureLibboxSetup()
 
             var antiDpiSocksPort = 0
-            if (settings.vpnMode == VpnMode.DPI_FRAGMENT_DOH) {
+            if (effectiveMode == VpnMode.DPI_FRAGMENT_DOH) {
                 val dohResolver = DohResolver(
                     vpnService = this,
-                    dohEndpointUrl = settings.resolveActiveDnsUrl(),
-                    bootstrapIp = settings.resolveBootstrapIp()
+                    dohEndpointUrl = effectiveSettings.resolveActiveDnsUrl(),
+                    bootstrapIp = effectiveSettings.resolveBootstrapIp()
                 )
                 localSocksAntiDpiServer = LocalSocksAntiDpiServer(
                     vpnService = this,
                     dohResolver = dohResolver,
-                    tlsFragmentEnabled = settings.tlsFragmentEnabled,
-                    fragmentSizeBytes = settings.fragmentSizeBytes,
-                    fragmentDelayMs = settings.fragmentDelayMs
+                    tlsFragmentEnabled = effectiveSettings.tlsFragmentEnabled,
+                    fragmentSizeBytes = effectiveSettings.fragmentSizeBytes,
+                    fragmentDelayMs = effectiveSettings.fragmentDelayMs
                 )
                 antiDpiSocksPort = localSocksAntiDpiServer?.start() ?: 0
             }
 
-            if (settings.vpnMode == VpnMode.PROXY_CHAIN && selectedProfile == null) {
-                throw IllegalStateException("لطفاً ابتدا یک سرور (VLESS/VMess/Trojan/SS/SOCKS5) در تب سرورها انتخاب کنید")
-            }
-
             val configJson = SingBoxConfigBuilder.buildConfig(
-                settings = settings,
+                settings = effectiveSettings,
                 profile = selectedProfile,
                 localSocksAntiDpiPort = antiDpiSocksPort
             )
@@ -147,20 +158,40 @@ class SeparVpnService : VpnService() {
 
             connectCommandClient()
 
-            val serverLabel = if (settings.vpnMode == VpnMode.PROXY_CHAIN && selectedProfile != null) {
+            // Wait briefly for sing-box mixed-in (127.0.0.1:10808) & TUN to bind, then verify real traffic
+            kotlinx.coroutines.delay(350)
+            VpnRuntimeState.appendLog("VPN", "در حال تست واقعی عبور ترافیک از تونل...")
+            val probeResult = com.example.data.NetworkProbe.verifyTunnelReachability()
+            val exitInfo = probeResult.getOrElse { err ->
+                throw IllegalStateException(
+                    if (effectiveMode == VpnMode.PROXY_CHAIN) {
+                        "اتصال به سرور خارجی برقرار نشد (سرور پاسخ نداد یا فیلتر است): ${err.message ?: "خطای شبکه"}"
+                    } else {
+                        "ترافیک از تونل عبور نکرد: ${err.message ?: "خطای شبکه"}"
+                    }
+                )
+            }
+
+            VpnRuntimeState.setExitIpInfo(exitInfo)
+            VpnRuntimeState.appendLog(
+                "VPN",
+                "تست واقعی موفق بود — IP خروج: ${exitInfo.ip} (${exitInfo.countryCode})"
+            )
+
+            val serverLabel = if (effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile != null) {
                 "${selectedProfile.name} (${selectedProfile.protocol.displayName})"
             } else {
                 null
             }
 
             VpnRuntimeState.updateSessionInfo(
-                activeDnsLabel = settings.resolveActiveDnsLabel(),
+                activeDnsLabel = effectiveSettings.resolveActiveDnsLabel(),
                 localProxyPort = antiDpiSocksPort,
                 activeServerLabel = serverLabel
             )
-            VpnRuntimeState.updateState(ConnectionState.Connected, settings.vpnMode)
+            VpnRuntimeState.updateState(ConnectionState.Connected, effectiveMode)
             promoteToForeground(
-                if (serverLabel != null) "سپر نت متصل: $serverLabel"
+                if (serverLabel != null) "سپر نت متصل (${exitInfo.countryCode}): $serverLabel"
                 else getString(R.string.notif_title_connected)
             )
             VpnRuntimeState.appendLog(
