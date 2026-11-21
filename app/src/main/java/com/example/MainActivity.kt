@@ -83,9 +83,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.model.ConnectionState
 import com.example.ui.MainViewModel
+import com.example.ui.StartupActionRecommendation
 import com.example.ui.screens.ConnectScreen
 import com.example.ui.screens.ProfilesScreen
 import com.example.ui.screens.SplitTunnelScreen
+import com.example.ui.screens.StartupLoadingScreen
 import com.example.ui.screens.ToolsScreen
 import com.example.ui.screens.WelcomeOnboardingScreen
 import com.example.ui.theme.ElectricBlue
@@ -139,68 +141,105 @@ fun SeparNetAppRoot(
         return
     }
 
+    val vpnPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.startVpnService()
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent != null) {
+            vpnPermissionLauncher.launch(prepareIntent)
+        } else {
+            viewModel.startVpnService()
+        }
+    }
+
+    val onToggleConnection: () -> Unit = {
+        val currentState = uiState.telemetry.state
+        if (currentState == ConnectionState.Connected || currentState == ConnectionState.Connecting) {
+            viewModel.stopVpnService()
+        } else {
+            val needsNotifPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+
+            if (needsNotifPermission) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                val prepareIntent = VpnService.prepare(context)
+                if (prepareIntent != null) {
+                    vpnPermissionLauncher.launch(prepareIntent)
+                } else {
+                    viewModel.startVpnService()
+                }
+            }
+        }
+    }
+
+    val latestConnState by rememberUpdatedState(uiState.telemetry.state)
+    val latestToggleConnection by rememberUpdatedState(onToggleConnection)
+
+    val rootStage = when {
+        !uiState.startupDismissed -> 0
+        !uiState.settings.onboardingSeen -> 1
+        else -> 2
+    }
+
     AnimatedContent(
-        targetState = uiState.settings.onboardingSeen,
+        targetState = rootStage,
         transitionSpec = {
             fadeIn(animationSpec = tween(260)) togetherWith fadeOut(animationSpec = tween(200))
         },
-        label = "onboardingTransition"
-    ) { onboardingSeen ->
-        if (!onboardingSeen) {
-            WelcomeOnboardingScreen(
-                onGetStarted = viewModel::dismissOnboarding
-            )
-            return@AnimatedContent
+        label = "rootStageTransition"
+    ) { stage ->
+        when (stage) {
+            0 -> {
+                StartupLoadingScreen(
+                    diagnostic = uiState.startupDiagnostic,
+                    onRetryScan = viewModel::runStartupInternetDiagnostic,
+                    onSmartConnectAndEnter = {
+                        val rec = uiState.startupDiagnostic.recommendation
+                        viewModel.dismissStartupLoading(markOnboardingSeen = true)
+                        if (rec == StartupActionRecommendation.GENERATE_AND_CONNECT_WARP) {
+                            viewModel.generateAndSelectWarp {
+                                val s = latestConnState
+                                if (s == ConnectionState.Disconnected || s is ConnectionState.Error) {
+                                    latestToggleConnection()
+                                }
+                            }
+                        } else if (rec == StartupActionRecommendation.CONNECT_SELECTED_SERVER ||
+                            rec == StartupActionRecommendation.CONNECT_ANTI_DPI_DOH
+                        ) {
+                            val s = latestConnState
+                            if (s == ConnectionState.Disconnected || s is ConnectionState.Error) {
+                                latestToggleConnection()
+                            }
+                        }
+                    },
+                    onEnterAppOnly = {
+                        viewModel.dismissStartupLoading(markOnboardingSeen = false)
+                    }
+                )
+                return@AnimatedContent
+            }
+            1 -> {
+                WelcomeOnboardingScreen(
+                    onGetStarted = viewModel::dismissOnboarding
+                )
+                return@AnimatedContent
+            }
         }
 
         val navController = rememberNavController()
         val snackbarHostState = remember { SnackbarHostState() }
-
-        val vpnPermissionLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                viewModel.startVpnService()
-            }
-        }
-
-        val notificationPermissionLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission()
-        ) { _ ->
-            val prepareIntent = VpnService.prepare(context)
-            if (prepareIntent != null) {
-                vpnPermissionLauncher.launch(prepareIntent)
-            } else {
-                viewModel.startVpnService()
-            }
-        }
-
-        val onToggleConnection: () -> Unit = {
-            val currentState = uiState.telemetry.state
-            if (currentState == ConnectionState.Connected || currentState == ConnectionState.Connecting) {
-                viewModel.stopVpnService()
-            } else {
-                val needsNotifPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.POST_NOTIFICATIONS
-                    ) != PackageManager.PERMISSION_GRANTED
-
-                if (needsNotifPermission) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                } else {
-                    val prepareIntent = VpnService.prepare(context)
-                    if (prepareIntent != null) {
-                        vpnPermissionLauncher.launch(prepareIntent)
-                    } else {
-                        viewModel.startVpnService()
-                    }
-                }
-            }
-        }
-
-        val latestConnState by rememberUpdatedState(uiState.telemetry.state)
-        val latestToggleConnection by rememberUpdatedState(onToggleConnection)
 
         LaunchedEffect(uiState.bannerMessage) {
             val msg = uiState.bannerMessage

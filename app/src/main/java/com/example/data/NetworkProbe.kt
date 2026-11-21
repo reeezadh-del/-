@@ -3,6 +3,8 @@ package com.example.data
 import com.example.model.ProxyProfile
 import com.example.model.ScanEndpointResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -282,6 +284,77 @@ object NetworkProbe {
         ScanEndpointResult("Google DoH", "8.8.8.8", 443, "DoH Resolver"),
         ScanEndpointResult("Quad9 DoH", "9.9.9.9", 443, "DoH Resolver")
     )
+
+    data class StartupNetworkCheckResult(
+        val isOnline: Boolean,
+        val networkTypeLabel: String,
+        val isVpnTransportActive: Boolean,
+        val dohReachable: Boolean,
+        val directLatencyMs: Long?,
+        val instagramBlocked: Boolean?,
+        val cloudflareEdgeReachable: Boolean
+    )
+
+    suspend fun checkStartupInternetStatus(context: android.content.Context): StartupNetworkCheckResult =
+        withContext(Dispatchers.IO) {
+            val cm = runCatching {
+                context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            }.getOrNull()
+
+            val activeNetwork = cm?.activeNetwork
+            val caps = activeNetwork?.let { runCatching { cm.getNetworkCapabilities(it) }.getOrNull() }
+            val hasInternet = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            val isVpnActive = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+
+            val transportLabel = when {
+                !hasInternet -> "آفلاین (بدون اینترنت)"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "وای‌فای (Wi-Fi)"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "اینترنت همراه (4G/5G)"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "شبکه کابلی"
+                else -> "شبکه فعال"
+            }
+
+            if (!hasInternet) {
+                return@withContext StartupNetworkCheckResult(
+                    isOnline = false,
+                    networkTypeLabel = transportLabel,
+                    isVpnTransportActive = false,
+                    dohReachable = false,
+                    directLatencyMs = null,
+                    instagramBlocked = null,
+                    cloudflareEdgeReachable = false
+                )
+            }
+
+            val (dnsProbe, igProbe, cfEdgeProbe) = coroutineScope {
+                val dnsDeferred = async {
+                    val primary = measureTlsHandshake("1.1.1.1", 443, "1.1.1.1", timeoutMs = 2200)
+                    if (primary.first > 0L) primary else measureTlsHandshake("8.8.8.8", 443, "8.8.8.8", timeoutMs = 2000)
+                }
+                val igDeferred = async {
+                    measureTlsHandshake("www.instagram.com", 443, "www.instagram.com", timeoutMs = 2200)
+                }
+                val cfDeferred = async {
+                    measureTcpLatency("162.159.192.1", 443, timeoutMs = 2000)
+                }
+                Triple(dnsDeferred.await(), igDeferred.await(), cfDeferred.await())
+            }
+
+            val bestLatency = listOf(dnsProbe.first, cfEdgeProbe)
+                .filter { it > 0L }
+                .minOrNull()
+
+            val anyReachable = bestLatency != null
+            StartupNetworkCheckResult(
+                isOnline = anyReachable || hasInternet,
+                networkTypeLabel = transportLabel,
+                isVpnTransportActive = isVpnActive,
+                dohReachable = dnsProbe.first > 0L,
+                directLatencyMs = bestLatency,
+                instagramBlocked = if (anyReachable) igProbe.second <= 0L else null,
+                cloudflareEdgeReachable = cfEdgeProbe > 0L || dnsProbe.first > 0L
+            )
+        }
 
     private fun isIpLiteral(value: String): Boolean {
         val parts = value.split(".")

@@ -49,7 +49,33 @@ data class MainUiState(
     val exitIpInfo: NetworkProbe.ExitIpInfo? = null,
     val isCheckingExitIp: Boolean = false,
     val isGeneratingWarp: Boolean = false,
-    val settingsLoaded: Boolean = false
+    val settingsLoaded: Boolean = false,
+    val startupDiagnostic: StartupDiagnosticState = StartupDiagnosticState(),
+    val startupDismissed: Boolean = false
+)
+
+enum class StartupActionRecommendation {
+    ALREADY_CONNECTED,
+    CONNECT_SELECTED_SERVER,
+    GENERATE_AND_CONNECT_WARP,
+    CONNECT_ANTI_DPI_DOH,
+    OFFLINE
+}
+
+data class StartupDiagnosticState(
+    val isScanning: Boolean = true,
+    val isCompleted: Boolean = false,
+    val isOnline: Boolean = true,
+    val networkTypeLabel: String = "در حال شناسایی شبکه…",
+    val directLatencyMs: Long? = null,
+    val dohReachable: Boolean = false,
+    val instagramBlocked: Boolean? = null,
+    val cloudflareEdgeReachable: Boolean = false,
+    val fastestProfileName: String? = null,
+    val fastestProfileLatencyMs: Long? = null,
+    val recommendation: StartupActionRecommendation = StartupActionRecommendation.GENERATE_AND_CONNECT_WARP,
+    val summaryMessage: String = "در حال بررسی کیفیت اینترنت و مسیرهای عبور…",
+    val activeStepIndex: Int = 0
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -68,6 +94,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _manualExitIpInfo = MutableStateFlow<NetworkProbe.ExitIpInfo?>(null)
     private val _isCheckingExitIp = MutableStateFlow(false)
     private val _isGeneratingWarp = MutableStateFlow(false)
+    private val _startupDiagnostic = MutableStateFlow(StartupDiagnosticState())
+    private val _startupDismissed = MutableStateFlow(false)
 
     private val baseDataFlow = combine(
         VpnRuntimeState.telemetry,
@@ -83,9 +111,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         VpnRuntimeState.exitIpInfo,
         _manualExitIpInfo,
         _isCheckingExitIp,
-        _isGeneratingWarp
-    ) { runtimeIp, manualIp, checking, generatingWarp ->
-        Triple(runtimeIp ?: manualIp, checking, generatingWarp)
+        _isGeneratingWarp,
+        _startupDiagnostic,
+        _startupDismissed
+    ) { values ->
+        val runtimeIp = values[0] as NetworkProbe.ExitIpInfo?
+        val manualIp = values[1] as NetworkProbe.ExitIpInfo?
+        val checking = values[2] as Boolean
+        val generatingWarp = values[3] as Boolean
+        val startupDiag = values[4] as StartupDiagnosticState
+        val startupDismissed = values[5] as Boolean
+        IpAndStartupSnapshot(
+            exitIp = runtimeIp ?: manualIp,
+            isCheckingExitIp = checking,
+            isGeneratingWarp = generatingWarp,
+            startupDiagnostic = startupDiag,
+            startupDismissed = startupDismissed
+        )
     }
 
     private val auxStateFlow = combine(
@@ -99,7 +141,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ipStateFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
-        val ipTriple = values[7] as Triple<NetworkProbe.ExitIpInfo?, Boolean, Boolean>
+        val ipSnap = values[7] as IpAndStartupSnapshot
         AuxSnapshot(
             apps = values[0] as List<InstalledAppInfo>,
             appsLoading = values[1] as Boolean,
@@ -108,9 +150,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isTesting = values[4] as Boolean,
             isImporting = values[5] as Boolean,
             banner = values[6] as String?,
-            exitIpInfo = ipTriple.first,
-            isCheckingExitIp = ipTriple.second,
-            isGeneratingWarp = ipTriple.third
+            exitIpInfo = ipSnap.exitIp,
+            isCheckingExitIp = ipSnap.isCheckingExitIp,
+            isGeneratingWarp = ipSnap.isGeneratingWarp,
+            startupDiagnostic = ipSnap.startupDiagnostic,
+            startupDismissed = ipSnap.startupDismissed
         )
     }
 
@@ -133,7 +177,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             exitIpInfo = aux.exitIpInfo,
             isCheckingExitIp = aux.isCheckingExitIp,
             isGeneratingWarp = aux.isGeneratingWarp,
-            settingsLoaded = true
+            settingsLoaded = true,
+            startupDiagnostic = aux.startupDiagnostic,
+            startupDismissed = aux.startupDismissed
         )
     }.stateIn(
         scope = viewModelScope,
@@ -143,6 +189,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadInstalledApps()
+        runStartupInternetDiagnostic()
     }
 
     fun startVpnService() {
@@ -471,6 +518,136 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun dismissStartupLoading(markOnboardingSeen: Boolean = false) {
+        _startupDismissed.value = true
+        if (markOnboardingSeen) {
+            viewModelScope.launch {
+                settingsRepo.setOnboardingSeen(true)
+            }
+        }
+    }
+
+    fun runStartupInternetDiagnostic() {
+        viewModelScope.launch {
+            val startedAt = System.currentTimeMillis()
+            _startupDiagnostic.value = StartupDiagnosticState(
+                isScanning = true,
+                isCompleted = false,
+                activeStepIndex = 0,
+                summaryMessage = "بررسی نوع اینترنت و کیفیت شبکه…"
+            )
+
+            val stepJob = launch {
+                kotlinx.coroutines.delay(520L)
+                _startupDiagnostic.update {
+                    if (it.isScanning) it.copy(
+                        activeStepIndex = 1,
+                        summaryMessage = "بررسی DNS امن و وضعیت دسترسی اینستاگرام…"
+                    ) else it
+                }
+                kotlinx.coroutines.delay(560L)
+                _startupDiagnostic.update {
+                    if (it.isScanning) it.copy(
+                        activeStepIndex = 2,
+                        summaryMessage = "انتخاب سریع‌ترین سرور و مسیر اتصال VPN…"
+                    ) else it
+                }
+            }
+
+            val netCheck = runCatching {
+                NetworkProbe.checkStartupInternetStatus(app)
+            }.getOrElse {
+                NetworkProbe.StartupNetworkCheckResult(
+                    isOnline = false,
+                    networkTypeLabel = "خطا در بررسی شبکه",
+                    isVpnTransportActive = false,
+                    dohReachable = false,
+                    directLatencyMs = null,
+                    instagramBlocked = null,
+                    cloudflareEdgeReachable = false
+                )
+            }
+
+            val profiles = runCatching { profileRepo.getAllOnce() }.getOrDefault(emptyList())
+            var fastestProfile: ProxyProfile? = null
+            var fastestMs: Long? = null
+
+            if (netCheck.isOnline && profiles.isNotEmpty()) {
+                val probed = profiles.take(6).map { p ->
+                    async(Dispatchers.IO) {
+                        val ms = NetworkProbe.measureTcpLatency(p.host, p.port, timeoutMs = 2000)
+                        if (ms > 0L) profileRepo.updateLatency(p.id, ms)
+                        p to ms
+                    }
+                }.awaitAll()
+
+                val bestPair = probed.filter { it.second > 0L }.minByOrNull { it.second }
+                if (bestPair != null) {
+                    fastestProfile = bestPair.first
+                    fastestMs = bestPair.second
+                    val currentSelected = profileRepo.getSelectedProfile()
+                    val currentSelectedReachable = currentSelected != null &&
+                        probed.any { it.first.id == currentSelected.id && it.second > 0L }
+                    if (!currentSelectedReachable) {
+                        profileRepo.select(fastestProfile.id)
+                    }
+                    settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+                }
+            }
+
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed < 1450L) {
+                kotlinx.coroutines.delay(1450L - elapsed)
+            }
+            stepJob.cancel()
+
+            val isAlreadyVpn = VpnRuntimeState.telemetry.value.state == ConnectionState.Connected
+            val recommendation = when {
+                isAlreadyVpn -> StartupActionRecommendation.ALREADY_CONNECTED
+                !netCheck.isOnline -> StartupActionRecommendation.OFFLINE
+                fastestProfile != null -> StartupActionRecommendation.CONNECT_SELECTED_SERVER
+                netCheck.cloudflareEdgeReachable -> StartupActionRecommendation.GENERATE_AND_CONNECT_WARP
+                else -> {
+                    settingsRepo.setVpnMode(VpnMode.DPI_FRAGMENT_DOH)
+                    StartupActionRecommendation.CONNECT_ANTI_DPI_DOH
+                }
+            }
+
+            val summary = when (recommendation) {
+                StartupActionRecommendation.ALREADY_CONNECTED ->
+                    "تونل سپر نت هم‌اکنون فعال و متصل است."
+                StartupActionRecommendation.OFFLINE ->
+                    "اینترنت دستگاه برقرار نیست. وای‌فای یا دیتای موبایل را بررسی کنید."
+                StartupActionRecommendation.CONNECT_SELECTED_SERVER ->
+                    "سریع‌ترین سرور با پینگ ${fastestMs}ms آماده اتصال است: ${fastestProfile?.name}"
+                StartupActionRecommendation.GENERATE_AND_CONNECT_WARP ->
+                    if (netCheck.instagramBlocked == true) {
+                        "اینستاگرام روی این اینترنت مسدود است؛ آماده ساخت و اتصال فوری به Cloudflare WARP."
+                    } else {
+                        "اینترنت پایدار است (${netCheck.directLatencyMs ?: "--"}ms)؛ آماده اتصال با Cloudflare WARP."
+                    }
+                StartupActionRecommendation.CONNECT_ANTI_DPI_DOH ->
+                    "دسترسی Cloudflare محدود است؛ حالت ضد فیلتر TLS Fragment + DoH برای شما تنظیم شد."
+            }
+
+            _startupDiagnostic.value = StartupDiagnosticState(
+                isScanning = false,
+                isCompleted = true,
+                isOnline = netCheck.isOnline,
+                networkTypeLabel = netCheck.networkTypeLabel,
+                directLatencyMs = netCheck.directLatencyMs,
+                dohReachable = netCheck.dohReachable,
+                instagramBlocked = netCheck.instagramBlocked,
+                cloudflareEdgeReachable = netCheck.cloudflareEdgeReachable,
+                fastestProfileName = fastestProfile?.name,
+                fastestProfileLatencyMs = fastestMs,
+                recommendation = recommendation,
+                summaryMessage = summary,
+                activeStepIndex = 3
+            )
+        }
+    }
+
     private fun showBanner(message: String) {
         _bannerMessage.value = message
     }
@@ -535,6 +712,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val logs: List<TunnelLogEntry>
     )
 
+    private data class IpAndStartupSnapshot(
+        val exitIp: NetworkProbe.ExitIpInfo?,
+        val isCheckingExitIp: Boolean,
+        val isGeneratingWarp: Boolean,
+        val startupDiagnostic: StartupDiagnosticState,
+        val startupDismissed: Boolean
+    )
+
     private data class AuxSnapshot(
         val apps: List<InstalledAppInfo>,
         val appsLoading: Boolean,
@@ -545,6 +730,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val banner: String?,
         val exitIpInfo: NetworkProbe.ExitIpInfo?,
         val isCheckingExitIp: Boolean,
-        val isGeneratingWarp: Boolean
+        val isGeneratingWarp: Boolean,
+        val startupDiagnostic: StartupDiagnosticState,
+        val startupDismissed: Boolean
     )
 }
