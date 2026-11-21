@@ -267,7 +267,7 @@ class SeparPlatformInterface(
 
                 val libIface = NetworkInterface().apply {
                     index = ifaceIndex
-                    mtu = if (lp.mtu > 0) lp.mtu else 1500
+                    mtu = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && lp.mtu > 0) lp.mtu else 1500
                     this.name = name
                     addresses = ListStringIterator(addrs)
                     flags = 65 // IFF_UP | IFF_RUNNING

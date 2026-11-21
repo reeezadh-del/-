@@ -31,3 +31,8 @@
 -keepclassmembers class com.example.model.** { *; }
 -keepclassmembers class com.example.data.** { *; }
 
+# OkHttp optional JVM TLS platform checks
+-dontwarn org.bouncycastle.jsse.**
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**
+

@@ -59,19 +59,26 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.example.model.ConnectionState
+import com.example.ui.theme.ConnectedGreen
 import com.example.ui.theme.CoralContainer
 import com.example.ui.theme.CoralError
+import com.example.ui.theme.CyanSecondary
+import com.example.ui.theme.ElectricBlue
+import com.example.ui.theme.ElectricBlueDeep
 import com.example.ui.theme.EmeraldContainer
-import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.ObsidianCardBorder
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.ObsidianSurfaceElevated
 import com.example.ui.theme.SaffronAmber
 import com.example.ui.theme.SaffronContainer
+import com.example.ui.theme.SkyCyanGlow
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import java.util.Locale
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 object FormatUtils {
     fun formatBytes(bytes: Long): String {
@@ -85,11 +92,11 @@ object FormatUtils {
     }
 
     fun formatSpeed(bps: Long): String {
-        if (bps < 1024L) return "$bps B/s"
+        if (bps < 1024L) return "0 KB/S"
         val kb = bps / 1024.0
-        if (kb < 1024.0) return String.format(Locale.US, "%.1f KB/s", kb)
+        if (kb < 1024.0) return String.format(Locale.US, "%.0f KB/S", kb)
         val mb = kb / 1024.0
-        return String.format(Locale.US, "%.2f MB/s", mb)
+        return String.format(Locale.US, "%.1f MB/S", mb)
     }
 
     fun formatDuration(connectedSinceMs: Long, nowMs: Long): String {
@@ -125,8 +132,8 @@ fun LtrText(
 fun GlassCard(
     modifier: Modifier = Modifier,
     borderColor: Color = ObsidianCardBorder,
-    containerColor: Color = ObsidianSurface.copy(alpha = 0.90f),
-    cornerRadius: Dp = 20.dp,
+    containerColor: Color = ObsidianSurface.copy(alpha = 0.88f),
+    cornerRadius: Dp = 22.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
@@ -137,7 +144,16 @@ fun GlassCard(
         tonalElevation = 2.dp
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.04f),
+                            Color.Transparent
+                        )
+                    )
+                )
+                .padding(16.dp),
             content = content
         )
     }
@@ -149,11 +165,11 @@ fun StatusPill(
     modifier: Modifier = Modifier
 ) {
     val (bgColor, fgColor, label) = when (state) {
-        ConnectionState.Connected -> Triple(EmeraldContainer, EmeraldPrimary, "متصل (اینستاگرام باز است)")
-        ConnectionState.Connecting -> Triple(SaffronContainer, SaffronAmber, "در حال تست اینستاگرام…")
+        ConnectionState.Connected -> Triple(Color(0xFF0E3330), ConnectedGreen, "متصل و ایمن")
+        ConnectionState.Connecting -> Triple(SaffronContainer, SaffronAmber, "در حال بررسی اتصال…")
         ConnectionState.Disconnecting -> Triple(SaffronContainer, SaffronAmber, "در حال قطع…")
         is ConnectionState.Error -> Triple(CoralContainer, CoralError, "اتصال ناموفق")
-        ConnectionState.Disconnected -> Triple(ObsidianSurfaceElevated, TextSecondary, "آماده اتصال")
+        ConnectionState.Disconnected -> Triple(ObsidianSurfaceElevated, TextSecondary, "متصل نیست")
     }
 
     val animatedBg by animateColorAsState(bgColor, label = "pillBg")
@@ -164,20 +180,20 @@ fun StatusPill(
             .clip(RoundedCornerShape(50))
             .background(animatedBg)
             .border(1.dp, animatedFg.copy(alpha = 0.35f), RoundedCornerShape(50))
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .size(8.dp)
+                .size(7.dp)
                 .clip(CircleShape)
                 .background(animatedFg)
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(7.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = animatedFg
         )
     }
@@ -192,7 +208,7 @@ fun RadarConnectOrb(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.93f else 1f,
+        targetValue = if (isPressed) 0.94f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "orbScale"
     )
@@ -203,21 +219,30 @@ fun RadarConnectOrb(
 
     val primaryAccent by animateColorAsState(
         targetValue = when {
-            isConnected -> EmeraldPrimary
+            isConnected -> SkyCyanGlow
             isBusy -> SaffronAmber
             isError -> CoralError
-            else -> TextMuted
+            else -> ElectricBlue
         },
         animationSpec = tween(350),
         label = "orbAccent"
     )
 
-    val infiniteTransition = rememberInfiniteTransition(label = "radar")
+    val infiniteTransition = rememberInfiniteTransition(label = "mandala")
+    val meshPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = if (isBusy) 4500 else 14000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "meshPhase"
+    )
     val pulseProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = if (isBusy) 1100 else 2200, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = if (isBusy) 1200 else 2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "pulse"
@@ -226,96 +251,137 @@ fun RadarConnectOrb(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = LinearEasing),
+            animation = tween(durationMillis = 1900, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "sweep"
     )
 
     Box(
-        modifier = modifier.size(230.dp),
+        modifier = modifier.size(276.dp),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val baseRadius = size.minDimension * 0.33f
-            val maxRadius = size.minDimension * 0.48f
+            val innerEdge = size.minDimension * 0.255f
+            val outerEdge = size.minDimension * 0.485f
 
-            if (isConnected || isBusy) {
-                val r1 = baseRadius + (maxRadius - baseRadius) * pulseProgress
-                val a1 = (1f - pulseProgress) * 0.42f
-                drawCircle(
-                    color = primaryAccent.copy(alpha = a1),
-                    radius = r1,
+            // Soft deep blue radial aura behind the spirograph mesh
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        primaryAccent.copy(alpha = if (isConnected) 0.34f else 0.16f),
+                        ElectricBlueDeep.copy(alpha = if (isConnected) 0.16f else 0.06f),
+                        Color.Transparent
+                    ),
                     center = center,
-                    style = Stroke(width = 3.dp.toPx())
-                )
+                    radius = outerEdge * 1.05f
+                ),
+                radius = outerEdge * 1.05f,
+                center = center
+            )
 
-                val p2 = (pulseProgress + 0.5f) % 1f
-                val r2 = baseRadius + (maxRadius - baseRadius) * p2
-                val a2 = (1f - p2) * 0.28f
+            // Procedural dot-matrix harmonic spirograph mandala (8-petal & 12-petal interference mesh)
+            val rings = 11
+            val steps = 84
+            val baseAlpha = when {
+                isConnected -> 0.85f
+                isBusy -> 0.72f
+                else -> 0.45f
+            }
+
+            for (ring in 0 until rings) {
+                val tRing = ring / (rings - 1f)
+                val rBase = innerEdge + (outerEdge - innerEdge) * tRing
+                val petals = if (ring % 2 == 0) 8f else 12f
+                val direction = if (ring % 2 == 0) 1f else -0.7f
+                val phaseOffset = meshPhase * direction + ring * 0.32f
+                val dotRadius = (1.15f + (1f - tRing) * 0.7f).dp.toPx() * 0.68f
+                val ringAlpha = baseAlpha * (1f - tRing * 0.55f)
+                val dotColor = if (ring % 3 == 0) SkyCyanGlow.copy(alpha = ringAlpha)
+                else primaryAccent.copy(alpha = ringAlpha)
+
+                for (s in 0 until steps) {
+                    val theta = (s.toFloat() / steps) * (2.0 * PI).toFloat()
+                    val wave = 0.80f + 0.20f * cos(petals * theta + phaseOffset)
+                    val r = rBase * wave
+                    val px = center.x + r * cos(theta + ring * 0.04f)
+                    val py = center.y + r * sin(theta + ring * 0.04f)
+                    drawCircle(
+                        color = dotColor,
+                        radius = dotRadius,
+                        center = Offset(px, py)
+                    )
+                }
+            }
+
+            // Expanding pulse ring when active/connecting
+            if (isConnected || isBusy) {
+                val pulseR = innerEdge + (outerEdge - innerEdge) * pulseProgress
                 drawCircle(
-                    color = primaryAccent.copy(alpha = a2),
-                    radius = r2,
+                    color = primaryAccent.copy(alpha = (1f - pulseProgress) * 0.42f),
+                    radius = pulseR,
                     center = center,
                     style = Stroke(width = 2.dp.toPx())
                 )
             }
 
-            // Ambient radial glow
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        primaryAccent.copy(alpha = if (isConnected) 0.28f else 0.12f),
-                        Color.Transparent
-                    ),
-                    center = center,
-                    radius = maxRadius
-                ),
-                radius = maxRadius,
-                center = center
-            )
-
-            // Rotating arc when connecting
+            // Spinning progress arc when connecting
             if (isBusy) {
+                val arcRadius = innerEdge + 4.dp.toPx()
                 drawArc(
                     color = primaryAccent,
                     startAngle = sweepAngle,
-                    sweepAngle = 95f,
+                    sweepAngle = 105f,
                     useCenter = false,
-                    style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                    topLeft = Offset(center.x - arcRadius, center.y - arcRadius),
+                    size = androidx.compose.ui.geometry.Size(arcRadius * 2f, arcRadius * 2f),
+                    style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
         }
 
-        // Main Tactile Power Button
+        // Tactile Central Power Orb (Midnight glass when off, Radiant Cobalt-Cyan when connected)
         Box(
             modifier = Modifier
                 .scale(pressScale)
-                .size(148.dp)
+                .size(134.dp)
                 .clip(CircleShape)
                 .background(
-                    Brush.verticalGradient(
-                        colors = if (isConnected) {
-                            listOf(Color(0xFF103F36), Color(0xFF07221C))
-                        } else {
-                            listOf(ObsidianSurfaceElevated, ObsidianSurface)
+                    Brush.radialGradient(
+                        colors = when {
+                            isConnected -> listOf(
+                                SkyCyanGlow,
+                                ElectricBlue,
+                                ElectricBlueDeep
+                            )
+                            isError -> listOf(
+                                Color(0xFF3E1929),
+                                Color(0xFF1D0D19)
+                            )
+                            else -> listOf(
+                                Color(0xFF21325C),
+                                Color(0xFF131D3D),
+                                Color(0xFF0C142B)
+                            )
                         }
                     )
                 )
                 .border(
-                    width = 2.5.dp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            primaryAccent,
-                            primaryAccent.copy(alpha = 0.35f)
-                        )
+                    width = 2.dp,
+                    brush = Brush.verticalGradient(
+                        colors = when {
+                            isConnected -> listOf(Color(0xFFA6EBFF), ElectricBlue)
+                            isBusy -> listOf(SaffronAmber, SaffronAmber.copy(alpha = 0.4f))
+                            isError -> listOf(CoralError, CoralError.copy(alpha = 0.4f))
+                            else -> listOf(Color(0xFF8FB8F6), Color(0xFF3A5289))
+                        }
                     ),
                     shape = CircleShape
                 )
                 .clickable(
                     interactionSource = interactionSource,
-                    indication = ripple(bounded = true, color = primaryAccent),
+                    indication = ripple(bounded = true, color = SkyCyanGlow),
                     onClick = onClick
                 )
                 .testTag("vpn_connect_button"),
@@ -324,25 +390,28 @@ fun RadarConnectOrb(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(
                     imageVector = when {
-                        isConnected -> Icons.Rounded.GppGood
+                        isConnected -> Icons.Rounded.PowerSettingsNew
                         isBusy -> Icons.Rounded.Sync
                         else -> Icons.Rounded.PowerSettingsNew
                     },
                     contentDescription = if (isConnected) "قطع اتصال VPN" else "شروع اتصال VPN",
-                    tint = if (isConnected || isBusy) primaryAccent else TextPrimary,
-                    modifier = Modifier.size(44.dp)
+                    tint = if (isConnected) Color.White else if (isBusy) SaffronAmber else TextPrimary,
+                    modifier = Modifier.size(34.dp)
                 )
                 Text(
                     text = when {
-                        isConnected -> "متصل"
-                        isBusy -> "صبر کنید"
-                        else -> "اتصال"
+                        isConnected -> "قطع اتصال"
+                        isBusy -> "صبر کنید…"
+                        isError -> "تلاش مجدد"
+                        else -> "لمس برای اتصال"
                     },
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (isConnected || isBusy) primaryAccent else TextPrimary,
-                    modifier = Modifier.padding(top = 6.dp)
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (isConnected) Color.White else TextSecondary,
+                    modifier = Modifier.padding(top = 6.dp, start = 10.dp, end = 10.dp),
+                    maxLines = 1
                 )
             }
         }
     }
 }
+

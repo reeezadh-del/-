@@ -11,16 +11,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 
 private val SeparDarkColorScheme = darkColorScheme(
-    primary = EmeraldPrimary,
-    onPrimary = OnEmerald,
+    primary = ElectricBlue,
+    onPrimary = TextPrimary,
     primaryContainer = EmeraldContainer,
-    onPrimaryContainer = EmeraldPrimary,
+    onPrimaryContainer = SkyCyanGlow,
     secondary = CyanSecondary,
-    onSecondary = OnEmerald,
+    onSecondary = ObsidianBg,
     secondaryContainer = CyanContainer,
     onSecondaryContainer = CyanSecondary,
     tertiary = SaffronAmber,
-    onTertiary = OnEmerald,
+    onTertiary = ObsidianBg,
     tertiaryContainer = SaffronContainer,
     onTertiaryContainer = SaffronAmber,
     background = ObsidianBg,

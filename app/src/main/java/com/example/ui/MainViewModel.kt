@@ -48,7 +48,8 @@ data class MainUiState(
     val bannerMessage: String? = null,
     val exitIpInfo: NetworkProbe.ExitIpInfo? = null,
     val isCheckingExitIp: Boolean = false,
-    val isGeneratingWarp: Boolean = false
+    val isGeneratingWarp: Boolean = false,
+    val settingsLoaded: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -131,7 +132,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             bannerMessage = aux.banner,
             exitIpInfo = aux.exitIpInfo,
             isCheckingExitIp = aux.isCheckingExitIp,
-            isGeneratingWarp = aux.isGeneratingWarp
+            isGeneratingWarp = aux.isGeneratingWarp,
+            settingsLoaded = true
         )
     }.stateIn(
         scope = viewModelScope,
@@ -461,6 +463,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissBanner() {
         _bannerMessage.value = null
+    }
+
+    fun dismissOnboarding() {
+        viewModelScope.launch {
+            settingsRepo.setOnboardingSeen(true)
+        }
     }
 
     private fun showBanner(message: String) {

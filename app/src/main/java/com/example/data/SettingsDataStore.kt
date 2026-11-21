@@ -25,7 +25,8 @@ data class UserSettings(
     val fragmentSizeBytes: Int = 24,
     val fragmentDelayMs: Int = 12,
     val multiplexEnabled: Boolean = false,
-    val bypassedPackages: Set<String> = emptySet()
+    val bypassedPackages: Set<String> = emptySet(),
+    val onboardingSeen: Boolean = false
 ) {
     fun resolveActiveDnsUrl(): String {
         return if (dnsPresetId == "custom" && customDohUrl.startsWith("https://")) {
@@ -58,6 +59,7 @@ class SettingsRepository(private val context: Context) {
         val FRAGMENT_DELAY_MS = intPreferencesKey("fragment_delay_ms")
         val MULTIPLEX_ENABLED = booleanPreferencesKey("multiplex_enabled")
         val BYPASSED_PACKAGES = stringSetPreferencesKey("bypassed_packages")
+        val ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
     }
 
     val settingsFlow: Flow<UserSettings> = context.dataStore.data.map { prefs ->
@@ -70,7 +72,8 @@ class SettingsRepository(private val context: Context) {
             fragmentSizeBytes = prefs[Keys.FRAGMENT_SIZE_BYTES] ?: 24,
             fragmentDelayMs = prefs[Keys.FRAGMENT_DELAY_MS] ?: 12,
             multiplexEnabled = prefs[Keys.MULTIPLEX_ENABLED] ?: false,
-            bypassedPackages = prefs[Keys.BYPASSED_PACKAGES] ?: emptySet()
+            bypassedPackages = prefs[Keys.BYPASSED_PACKAGES] ?: emptySet(),
+            onboardingSeen = prefs[Keys.ONBOARDING_SEEN] ?: false
         )
     }
 
@@ -126,5 +129,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun clearBypassedPackages() {
         context.dataStore.edit { it[Keys.BYPASSED_PACKAGES] = emptySet() }
+    }
+
+    suspend fun setOnboardingSeen(seen: Boolean) {
+        context.dataStore.edit { it[Keys.ONBOARDING_SEEN] = seen }
     }
 }
