@@ -414,6 +414,30 @@ class ExampleRobolectricTest {
         assertEquals("relay-server", relayOutbound.getString("tag"))
         assertEquals("hysteria2", relayOutbound.getString("type"))
     }
+
+    @Test
+    fun `ai core engine personas portals and auto discovery defaults are valid`() {
+        val defaults = com.example.data.UserSettings()
+        assertEquals(com.example.model.VpnMode.AI_AUTO_DISCOVERY, defaults.vpnMode)
+
+        assertTrue(com.example.ai.AiExpertPersona.entries.size >= 4)
+        assertTrue(com.example.ai.AiCoreEngine.GLOBAL_AI_PORTALS.size >= 6)
+        assertTrue(
+            com.example.ai.AiCoreEngine.GLOBAL_AI_PORTALS.all {
+                it.url.startsWith("https://") && it.name.isNotBlank()
+            }
+        )
+    }
+
+    @Test
+    fun `github vpn manager workflow yaml and protocols are valid`() {
+        val yaml = com.example.data.GitHubVpnManager.WORKFLOW_YAML
+        assertTrue(yaml.contains("workflow_dispatch"))
+        assertTrue(yaml.contains("sing-box"))
+        assertTrue(yaml.contains("cloudflared"))
+        assertTrue(yaml.contains("vpn-live"))
+        assertEquals(3, com.example.data.GitHubVpnManager.GitHubServerProtocol.entries.size)
+    }
 }
 
 

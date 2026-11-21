@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -92,6 +93,7 @@ fun ProfilesScreen(
     onDeleteProfile: (Long) -> Unit,
     onGenerateWarp: () -> Unit = {},
     onImportPublicFeed: (WarpProvisioner.PublicFeedPreset) -> Unit = {},
+    onOpenGitHubBuilder: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -201,6 +203,26 @@ fun ProfilesScreen(
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("ساخت اکانت رایگان Cloudflare WARP + اسکن آی‌پی تمیز", color = CyanSecondary)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = onOpenGitHubBuilder,
+                border = BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.55f)),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("open_github_builder_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Code,
+                    contentDescription = null,
+                    tint = EmeraldPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("ساخت سرور VPN با گیت‌هاب (Actions / Gist / Search)", color = EmeraldPrimary)
             }
 
             if (uiState.isImportingSubscription) {

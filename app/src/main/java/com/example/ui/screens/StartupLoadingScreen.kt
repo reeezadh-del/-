@@ -358,7 +358,7 @@ fun StartupLoadingScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     DiagnosticStepRow(
-                        label = "بررسی فیلترینگ اینستاگرام و پینگ DNS امن",
+                        label = "بررسی محدودیت اینترنت و پینگ DNS امن",
                         done = diagnostic.activeStepIndex > 1,
                         active = diagnostic.activeStepIndex == 1
                     )
@@ -419,7 +419,7 @@ fun StartupLoadingScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "دسترسی مستقیم اینستاگرام",
+                                text = "وضعیت دسترسی خارجی",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextMuted
                             )

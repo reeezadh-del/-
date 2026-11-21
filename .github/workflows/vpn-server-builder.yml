@@ -1,0 +1,221 @@
+name: SeparNet VPN Server Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'Tunnel protocol (vless-ws, vmess-ws, trojan-ws)'
+        required: false
+        default: 'vless-ws'
+        type: choice
+        options:
+          - vless-ws
+          - vmess-ws
+          - trojan-ws
+      clean_cf_ip:
+        description: 'Cloudflare Clean Anycast IP (leave blank to use trycloudflare domain directly)'
+        required: false
+        default: '162.159.192.1'
+        type: string
+      ws_path:
+        description: 'WebSocket path'
+        required: false
+        default: '/separws'
+        type: string
+      duration_minutes:
+        description: 'Keep VPN server alive duration in minutes (max 330)'
+        required: false
+        default: '300'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  vpn-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install sing-box and cloudflared
+        run: |
+          set -e
+          mkdir -p /tmp/vpn-bin
+          SB_URL=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/SagerNet/sing-box/releases/latest \
+            | python3 -c "import sys,json; data=json.load(sys.stdin); print(next(a['browser_download_url'] for a in data['assets'] if 'linux-amd64.tar.gz' in a['name']))")
+          curl -fsSL "$SB_URL" -o /tmp/sing-box.tar.gz
+          tar -xzf /tmp/sing-box.tar.gz -C /tmp/vpn-bin --strip-components=1
+          chmod +x /tmp/vpn-bin/sing-box
+
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/vpn-bin/cloudflared
+          chmod +x /tmp/vpn-bin/cloudflared
+
+      - name: Start sing-box + Cloudflare tunnel & publish node
+        id: server
+        env:
+          INPUT_PROTOCOL: ${{ inputs.protocol || 'vless-ws' }}
+          INPUT_CLEAN_IP: ${{ inputs.clean_cf_ip || '162.159.192.1' }}
+          INPUT_WS_PATH: ${{ inputs.ws_path || '/separws' }}
+          INPUT_DURATION: ${{ inputs.duration_minutes || '300' }}
+        run: |
+          set -e
+          UUID=$(cat /proc/sys/kernel/random/uuid)
+          PASS=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)
+          WS_PATH="${INPUT_WS_PATH:-/separws}"
+          PROTO="${INPUT_PROTOCOL:-vless-ws}"
+          CLEAN_IP="${INPUT_CLEAN_IP:-162.159.192.1}"
+
+          python3 - <<PY
+          import json
+
+          proto = "$PROTO"
+          uuid = "$UUID"
+          password = "$PASS"
+          ws_path = "$WS_PATH"
+
+          if proto == "vmess-ws":
+              inbound = {
+                  "type": "vmess",
+                  "tag": "vpn-in",
+                  "listen": "127.0.0.1",
+                  "listen_port": 8080,
+                  "users": [{"uuid": uuid, "alterId": 0}],
+                  "transport": {"type": "ws", "path": ws_path}
+              }
+          elif proto == "trojan-ws":
+              inbound = {
+                  "type": "trojan",
+                  "tag": "vpn-in",
+                  "listen": "127.0.0.1",
+                  "listen_port": 8080,
+                  "users": [{"password": password}],
+                  "transport": {"type": "ws", "path": ws_path}
+              }
+          else:
+              inbound = {
+                  "type": "vless",
+                  "tag": "vpn-in",
+                  "listen": "127.0.0.1",
+                  "listen_port": 8080,
+                  "users": [{"uuid": uuid}],
+                  "transport": {"type": "ws", "path": ws_path}
+              }
+
+          cfg = {
+              "log": {"level": "warn"},
+              "dns": {"servers": [{"tag": "cf", "address": "1.1.1.1"}]},
+              "inbounds": [inbound],
+              "outbounds": [{"type": "direct", "tag": "direct"}]
+          }
+          with open("/tmp/sb-server.json", "w") as f:
+              json.dump(cfg, f, indent=2)
+          PY
+
+          /tmp/vpn-bin/sing-box run -c /tmp/sb-server.json > /tmp/singbox.log 2>&1 &
+          SB_PID=$!
+          echo "$SB_PID" > /tmp/sb.pid
+
+          /tmp/vpn-bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080 > /tmp/cf.log 2>&1 &
+          CF_PID=$!
+          echo "$CF_PID" > /tmp/cf.pid
+
+          CF_HOST=""
+          for i in $(seq 1 45); do
+            CF_HOST=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -n1 | sed 's|https://||') || true
+            if [ -n "$CF_HOST" ]; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [ -z "$CF_HOST" ]; then
+            cat /tmp/cf.log
+            exit 1
+          fi
+
+          python3 - <<PY
+          import base64, json, urllib.parse
+          from datetime import datetime, timezone, timedelta
+
+          proto = "$PROTO"
+          uuid = "$UUID"
+          password = "$PASS"
+          ws_path = "$WS_PATH"
+          cf_host = "$CF_HOST"
+          clean_ip = "$CLEAN_IP".strip() or cf_host
+          dur_min = max(5, min(330, int("$INPUT_DURATION" or "300")))
+          enc_path = urllib.parse.quote(ws_path, safe="")
+
+          if proto == "vmess-ws":
+              def make_vmess(addr, tag):
+                  obj = {
+                      "v": "2", "ps": tag, "add": addr, "port": "443",
+                      "id": uuid, "aid": "0", "net": "ws", "type": "none",
+                      "host": cf_host, "path": ws_path, "tls": "tls", "sni": cf_host
+                  }
+                  return "vmess://" + base64.b64encode(json.dumps(obj).encode()).decode()
+              clean_uri = make_vmess(clean_ip, "SeparNet-GitHub-CleanIP")
+              direct_uri = make_vmess(cf_host, "SeparNet-GitHub-Direct")
+          elif proto == "trojan-ws":
+              clean_uri = f"trojan://{password}@{clean_ip}:443?security=tls&sni={cf_host}&fp=chrome&type=ws&host={cf_host}&path={enc_path}#SeparNet-GitHub-CleanIP"
+              direct_uri = f"trojan://{password}@{cf_host}:443?security=tls&sni={cf_host}&fp=chrome&type=ws&host={cf_host}&path={enc_path}#SeparNet-GitHub-Direct"
+          else:
+              clean_uri = f"vless://{uuid}@{clean_ip}:443?encryption=none&security=tls&sni={cf_host}&fp=chrome&type=ws&host={cf_host}&path={enc_path}#SeparNet-GitHub-CleanIP"
+              direct_uri = f"vless://{uuid}@{cf_host}:443?encryption=none&security=tls&sni={cf_host}&fp=chrome&type=ws&host={cf_host}&path={enc_path}#SeparNet-GitHub-Direct"
+
+          now = datetime.now(timezone.utc)
+          exp = now + timedelta(minutes=dur_min)
+          payload = {
+              "status": "running",
+              "run_id": "${{ github.run_id }}",
+              "protocol": proto,
+              "tunnel_host": cf_host,
+              "clean_ip": clean_ip,
+              "clean_uri": clean_uri,
+              "direct_uri": direct_uri,
+              "started_at_utc": now.isoformat(),
+              "expires_at_utc": exp.isoformat()
+          }
+          with open("/tmp/github-vpn-live.json", "w") as f:
+              json.dump(payload, f, indent=2)
+          with open("/tmp/github-vpn-sub.txt", "w") as f:
+              f.write(clean_uri + "\n" + direct_uri + "\n")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan vpn-live-tmp
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/github-vpn-live.json github-vpn-live.json
+          cp /tmp/github-vpn-sub.txt github-vpn-sub.txt
+          git add github-vpn-live.json github-vpn-sub.txt
+          git commit -m "Publish live GitHub VPN server (${{ github.run_id }})"
+          git push origin HEAD:refs/heads/vpn-live --force
+
+          {
+            echo "## SeparNet GitHub VPN Server Live"
+            echo ""
+            echo "- **Protocol:** \`$PROTO\`"
+            echo "- **Tunnel Host:** \`$CF_HOST\`"
+            echo "- **Clean CF IP:** \`$CLEAN_IP\`"
+            echo ""
+            echo "### Copy Ready Configs"
+            echo '```text'
+            cat /tmp/github-vpn-sub.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          END_EPOCH=$(( $(date +%s) + (${INPUT_DURATION:-300} * 60) ))
+          while [ $(date +%s) -lt "$END_EPOCH" ]; do
+            if ! kill -0 "$SB_PID" 2>/dev/null || ! kill -0 "$CF_PID" 2>/dev/null; then
+              echo "Tunnel daemon exited unexpectedly"
+              exit 1
+            fi
+            sleep 30
+          done

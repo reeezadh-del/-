@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "separ_settings")
 
 data class UserSettings(
-    val vpnMode: VpnMode = VpnMode.DPI_FRAGMENT_DOH,
+    val vpnMode: VpnMode = VpnMode.AI_AUTO_DISCOVERY,
     val dnsPresetId: String = "cloudflare",
     val customDohUrl: String = "",
     val tlsFragmentEnabled: Boolean = true,
@@ -26,7 +26,10 @@ data class UserSettings(
     val fragmentDelayMs: Int = 12,
     val multiplexEnabled: Boolean = false,
     val bypassedPackages: Set<String> = emptySet(),
-    val onboardingSeen: Boolean = false
+    val onboardingSeen: Boolean = false,
+    val githubToken: String = "",
+    val githubRepo: String = "",
+    val githubGistId: String = ""
 ) {
     fun resolveActiveDnsUrl(): String {
         return if (dnsPresetId == "custom" && customDohUrl.startsWith("https://")) {
@@ -60,12 +63,15 @@ class SettingsRepository(private val context: Context) {
         val MULTIPLEX_ENABLED = booleanPreferencesKey("multiplex_enabled")
         val BYPASSED_PACKAGES = stringSetPreferencesKey("bypassed_packages")
         val ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
+        val GITHUB_TOKEN = stringPreferencesKey("github_token")
+        val GITHUB_REPO = stringPreferencesKey("github_repo")
+        val GITHUB_GIST_ID = stringPreferencesKey("github_gist_id")
     }
 
     val settingsFlow: Flow<UserSettings> = context.dataStore.data.map { prefs ->
-        val modeName = prefs[Keys.VPN_MODE] ?: VpnMode.DPI_FRAGMENT_DOH.name
+        val modeName = prefs[Keys.VPN_MODE] ?: VpnMode.AI_AUTO_DISCOVERY.name
         UserSettings(
-            vpnMode = VpnMode.entries.firstOrNull { it.name == modeName } ?: VpnMode.DPI_FRAGMENT_DOH,
+            vpnMode = VpnMode.entries.firstOrNull { it.name == modeName } ?: VpnMode.AI_AUTO_DISCOVERY,
             dnsPresetId = prefs[Keys.DNS_PRESET_ID] ?: "cloudflare",
             customDohUrl = prefs[Keys.CUSTOM_DOH_URL] ?: "",
             tlsFragmentEnabled = prefs[Keys.TLS_FRAGMENT_ENABLED] ?: true,
@@ -73,7 +79,10 @@ class SettingsRepository(private val context: Context) {
             fragmentDelayMs = prefs[Keys.FRAGMENT_DELAY_MS] ?: 12,
             multiplexEnabled = prefs[Keys.MULTIPLEX_ENABLED] ?: false,
             bypassedPackages = prefs[Keys.BYPASSED_PACKAGES] ?: emptySet(),
-            onboardingSeen = prefs[Keys.ONBOARDING_SEEN] ?: false
+            onboardingSeen = prefs[Keys.ONBOARDING_SEEN] ?: false,
+            githubToken = prefs[Keys.GITHUB_TOKEN] ?: "",
+            githubRepo = prefs[Keys.GITHUB_REPO] ?: "",
+            githubGistId = prefs[Keys.GITHUB_GIST_ID] ?: ""
         )
     }
 
@@ -133,5 +142,16 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setOnboardingSeen(seen: Boolean) {
         context.dataStore.edit { it[Keys.ONBOARDING_SEEN] = seen }
+    }
+
+    suspend fun setGitHubCredentials(token: String, repo: String) {
+        context.dataStore.edit {
+            it[Keys.GITHUB_TOKEN] = token.trim()
+            it[Keys.GITHUB_REPO] = repo.trim()
+        }
+    }
+
+    suspend fun setGitHubGistId(gistId: String) {
+        context.dataStore.edit { it[Keys.GITHUB_GIST_ID] = gistId.trim() }
     }
 }

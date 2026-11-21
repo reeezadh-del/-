@@ -4,10 +4,15 @@ import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.SeparApp
+import com.example.ai.AiCoreEngine
+import com.example.ai.AiExpertPersona
+import com.example.ai.AiUpgradePlan
 import com.example.data.ConfigUriParser
+import com.example.data.GitHubVpnManager
 import com.example.data.NetworkProbe
 import com.example.data.UserSettings
 import com.example.data.VpnRuntimeState
@@ -20,18 +25,38 @@ import com.example.model.TunnelLogEntry
 import com.example.model.VpnMode
 import com.example.model.VpnTelemetry
 import com.example.vpn.SeparVpnService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+data class AiChatMessage(
+    val id: Long,
+    val isUser: Boolean,
+    val text: String,
+    val personaTitle: String
+)
+
+data class GitHubUiState(
+    val isBuildingServer: Boolean = false,
+    val buildProgressMessage: String = "",
+    val liveServer: GitHubVpnManager.GitHubLiveServerResult? = null,
+    val isCreatingGist: Boolean = false,
+    val gistResult: GitHubVpnManager.GitHubGistResult? = null,
+    val isSearchingRepos: Boolean = false,
+    val discoveredRepos: List<GitHubVpnManager.GitHubRepoDiscoveryItem> = emptyList(),
+    val errorMessage: String? = null
+)
 
 data class MainUiState(
     val telemetry: VpnTelemetry = VpnTelemetry(),
@@ -51,7 +76,15 @@ data class MainUiState(
     val isGeneratingWarp: Boolean = false,
     val settingsLoaded: Boolean = false,
     val startupDiagnostic: StartupDiagnosticState = StartupDiagnosticState(),
-    val startupDismissed: Boolean = false
+    val startupDismissed: Boolean = false,
+    val selectedAiPersona: AiExpertPersona = AiExpertPersona.VPN_OPTIMIZER,
+    val aiMessages: List<AiChatMessage> = emptyList(),
+    val aiStreamingText: String = "",
+    val isAiLoading: Boolean = false,
+    val aiErrorMessage: String? = null,
+    val isAiSelfUpgrading: Boolean = false,
+    val lastAiUpgradePlan: AiUpgradePlan? = null,
+    val github: GitHubUiState = GitHubUiState()
 )
 
 enum class StartupActionRecommendation {
@@ -96,6 +129,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGeneratingWarp = MutableStateFlow(false)
     private val _startupDiagnostic = MutableStateFlow(StartupDiagnosticState())
     private val _startupDismissed = MutableStateFlow(false)
+    private val _selectedAiPersona = MutableStateFlow(AiExpertPersona.VPN_OPTIMIZER)
+    private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
+    private val _aiStreamingText = MutableStateFlow("")
+    private val _isAiLoading = MutableStateFlow(false)
+    private val _aiErrorMessage = MutableStateFlow<String?>(null)
+    private val _isAiSelfUpgrading = MutableStateFlow(false)
+    private val _lastAiUpgradePlan = MutableStateFlow<AiUpgradePlan?>(null)
+    private val _githubState = MutableStateFlow(GitHubUiState())
+    private var aiChatJob: Job? = null
 
     private val baseDataFlow = combine(
         VpnRuntimeState.telemetry,
@@ -130,6 +172,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private val aiStatusSubFlow = combine(
+        _isAiLoading,
+        _aiErrorMessage,
+        _isAiSelfUpgrading,
+        _lastAiUpgradePlan
+    ) { loading, error, upgrading, plan ->
+        AiStatusSnapshot(loading, error, upgrading, plan)
+    }
+
+    private val aiStateFlow = combine(
+        _selectedAiPersona,
+        _aiMessages,
+        _aiStreamingText,
+        aiStatusSubFlow
+    ) { persona, messages, streaming, status ->
+        AiSnapshot(
+            selectedPersona = persona,
+            messages = messages,
+            streamingText = streaming,
+            isLoading = status.isLoading,
+            errorMessage = status.errorMessage,
+            isSelfUpgrading = status.isSelfUpgrading,
+            lastUpgradePlan = status.lastUpgradePlan
+        )
+    }
+
     private val auxStateFlow = combine(
         _installedAppsRaw,
         _appsLoading,
@@ -158,7 +226,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    val uiState: StateFlow<MainUiState> = combine(baseDataFlow, auxStateFlow) { base, aux ->
+    val uiState: StateFlow<MainUiState> = combine(
+        baseDataFlow,
+        auxStateFlow,
+        aiStateFlow,
+        _githubState
+    ) { base, aux, ai, github ->
         val bypassedSet = base.settings.bypassedPackages
         val mappedApps = aux.apps.map { it.copy(isBypassed = it.packageName in bypassedSet) }
         MainUiState(
@@ -179,7 +252,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isGeneratingWarp = aux.isGeneratingWarp,
             settingsLoaded = true,
             startupDiagnostic = aux.startupDiagnostic,
-            startupDismissed = aux.startupDismissed
+            startupDismissed = aux.startupDismissed,
+            selectedAiPersona = ai.selectedPersona,
+            aiMessages = ai.messages,
+            aiStreamingText = ai.streamingText,
+            isAiLoading = ai.isLoading,
+            aiErrorMessage = ai.errorMessage,
+            isAiSelfUpgrading = ai.isSelfUpgrading,
+            lastAiUpgradePlan = ai.lastUpgradePlan,
+            github = github
         )
     }.stateIn(
         scope = viewModelScope,
@@ -527,6 +608,373 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectAiPersona(persona: AiExpertPersona) {
+        _selectedAiPersona.value = persona
+        _aiErrorMessage.value = null
+    }
+
+    fun dismissAiError() {
+        _aiErrorMessage.value = null
+    }
+
+    fun clearAiChat() {
+        aiChatJob?.cancel()
+        _aiMessages.value = emptyList()
+        _aiStreamingText.value = ""
+        _isAiLoading.value = false
+        _aiErrorMessage.value = null
+    }
+
+    fun sendAiChatMessage(rawPrompt: String) {
+        val prompt = rawPrompt.trim()
+        if (prompt.isEmpty() || _isAiLoading.value) return
+
+        val persona = _selectedAiPersona.value
+        val historySnapshot = _aiMessages.value.map { it.isUser to it.text }
+        val userMsg = AiChatMessage(
+            id = System.nanoTime(),
+            isUser = true,
+            text = prompt,
+            personaTitle = persona.titleFa
+        )
+        _aiMessages.update { it + userMsg }
+        _aiStreamingText.value = ""
+        _isAiLoading.value = true
+        _aiErrorMessage.value = null
+
+        aiChatJob?.cancel()
+        aiChatJob = viewModelScope.launch {
+            val acc = StringBuilder()
+            try {
+                AiCoreEngine.streamChat(
+                    persona = persona,
+                    historyPairs = historySnapshot,
+                    userPrompt = prompt
+                ).collect { chunk ->
+                    acc.append(chunk)
+                    _aiStreamingText.value = acc.toString()
+                }
+                val finalAnswer = acc.toString().trim()
+                if (finalAnswer.isNotEmpty()) {
+                    _aiMessages.update {
+                        it + AiChatMessage(
+                            id = System.nanoTime(),
+                            isUser = false,
+                            text = finalAnswer,
+                            personaTitle = persona.titleFa
+                        )
+                    }
+                } else {
+                    _aiErrorMessage.value = "پاسخی از هسته هوش مصنوعی دریافت نشد."
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.e("MainViewModel", "AI chat timed out", e)
+                _aiErrorMessage.value = "زمان پاسخ‌گویی هوش مصنوعی به پایان رسید. اتصال اینترنت یا VPN را بررسی کنید."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "AI chat failed", e)
+                _aiErrorMessage.value = "خطا در ارتباط با هسته هوش مصنوعی: ${e.message ?: "خطای ناشناخته"}"
+            } finally {
+                _aiStreamingText.value = ""
+                _isAiLoading.value = false
+            }
+        }
+    }
+
+    fun runAiSelfUpgrade() {
+        if (_isAiSelfUpgrading.value) return
+        viewModelScope.launch {
+            _isAiSelfUpgrading.value = true
+            _aiErrorMessage.value = null
+            val current = uiState.value
+            val diag = current.startupDiagnostic
+            val recentLogs = current.logs.takeLast(12).joinToString("\n") { "[${it.tag}] ${it.message}" }
+            val telemetryPrompt = """
+                Analyze this Android VPN client telemetry and return an optimized self-upgrade JSON plan:
+                - Network Type: ${diag.networkTypeLabel}
+                - Direct Latency (ms): ${diag.directLatencyMs ?: "unknown"}
+                - DoH Reachable: ${diag.dohReachable}
+                - Cloudflare Edge Reachable: ${diag.cloudflareEdgeReachable}
+                - External Censorship Detected: ${diag.instagramBlocked ?: "unknown"}
+                - Saved Server Profiles Count: ${current.profiles.size}
+                - Current VpnMode: ${current.settings.vpnMode.name}
+                - Current TLS Fragment: enabled=${current.settings.tlsFragmentEnabled}, size=${current.settings.fragmentSizeBytes}, delay=${current.settings.fragmentDelayMs}
+                - Current Multiplex: ${current.settings.multiplexEnabled}
+                - Current DNS Preset: ${current.settings.dnsPresetId}
+                - Connection State: ${current.telemetry.state}
+                - Recent Core Logs:
+                $recentLogs
+            """.trimIndent()
+
+            val result = AiCoreEngine.generateSelfUpgradePlan(telemetryPrompt)
+            _isAiSelfUpgrading.value = false
+            result.fold(
+                onSuccess = { plan ->
+                    val targetMode = VpnMode.entries.firstOrNull { it.name == plan.recommendedMode }
+                        ?: VpnMode.AI_AUTO_DISCOVERY
+                    settingsRepo.setVpnMode(targetMode)
+                    settingsRepo.setTlsFragmentEnabled(true)
+                    settingsRepo.setFragmentParams(
+                        plan.recommendedFragmentSize,
+                        plan.recommendedFragmentDelayMs
+                    )
+                    settingsRepo.setMultiplexEnabled(plan.recommendedMultiplex)
+                    settingsRepo.setDnsPreset(plan.recommendedDnsId)
+
+                    _lastAiUpgradePlan.value = plan
+                    VpnRuntimeState.appendLog(
+                        "AI-Upgrade",
+                        "خودارتقایی هسته VPN اعمال شد: ${targetMode.name} • Fragment ${plan.recommendedFragmentSize}B/${plan.recommendedFragmentDelayMs}ms • DNS=${plan.recommendedDnsId}"
+                    )
+                    showBanner("هسته VPN توسط هوش مصنوعی تحلیل و ارتقا یافت")
+                },
+                onFailure = { err ->
+                    val msg = err.message ?: "خطا در تحلیل و ارتقای هوشمند"
+                    _aiErrorMessage.value = msg
+                    showBanner(msg)
+                }
+            )
+        }
+    }
+
+    fun prepareAiAutoDiscoveryMode() {
+        viewModelScope.launch {
+            settingsRepo.setVpnMode(VpnMode.AI_AUTO_DISCOVERY)
+            showBanner("حالت «هوش مصنوعی خودارتقاگر» فعال شد")
+        }
+    }
+
+    fun dismissGitHubError() {
+        _githubState.update { it.copy(errorMessage = null) }
+    }
+
+    fun saveGitHubCredentials(token: String, repo: String) {
+        viewModelScope.launch {
+            settingsRepo.setGitHubCredentials(token, repo)
+        }
+    }
+
+    fun deployAndStartGitHubVpnServer(
+        token: String,
+        repo: String,
+        protocol: GitHubVpnManager.GitHubServerProtocol,
+        cleanCfIp: String
+    ) {
+        if (_githubState.value.isBuildingServer) return
+        viewModelScope.launch {
+            settingsRepo.setGitHubCredentials(token, repo)
+            _githubState.update {
+                it.copy(
+                    isBuildingServer = true,
+                    buildProgressMessage = "در حال اتصال به GitHub API…",
+                    errorMessage = null
+                )
+            }
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val result = GitHubVpnManager.deployAndStartGitHubServer(
+                token = token,
+                repoInput = repo,
+                protocol = protocol,
+                cleanCfIp = cleanCfIp,
+                useLocalProxy = isConnected,
+                onProgress = { msg ->
+                    _githubState.update { it.copy(buildProgressMessage = msg) }
+                }
+            )
+            result.fold(
+                onSuccess = { live ->
+                    settingsRepo.setGitHubCredentials(token, live.repoFullName)
+                    if (live.profiles.isNotEmpty()) {
+                        profileRepo.replaceSubscriptionProfiles(live.rawSubscriptionUrl, live.profiles)
+                        val saved = profileRepo.getAllOnce()
+                            .firstOrNull { it.rawUri == live.profiles.first().rawUri }
+                        if (saved != null) {
+                            profileRepo.select(saved.id)
+                            settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+                        }
+                    }
+                    _githubState.update {
+                        it.copy(
+                            isBuildingServer = false,
+                            buildProgressMessage = "سرور گیت‌هاب روشن و آماده اتصال است (${live.tunnelHost})",
+                            liveServer = live
+                        )
+                    }
+                    VpnRuntimeState.appendLog(
+                        "GitHub-VPN",
+                        "سرور گیت‌هاب ساخته و انتخاب شد: ${live.repoFullName} (${live.tunnelHost})"
+                    )
+                    showBanner("سرور VPN گیت‌هاب ساخته، اضافه و انتخاب شد!")
+                },
+                onFailure = { err ->
+                    val msg = err.message ?: "خطا در ساخت سرور گیت‌هاب"
+                    _githubState.update {
+                        it.copy(
+                            isBuildingServer = false,
+                            buildProgressMessage = "",
+                            errorMessage = msg
+                        )
+                    }
+                    showBanner(msg)
+                }
+            )
+        }
+    }
+
+    fun fetchExistingGitHubLiveServer(token: String, repo: String) {
+        if (_githubState.value.isBuildingServer) return
+        viewModelScope.launch {
+            settingsRepo.setGitHubCredentials(token, repo)
+            _githubState.update {
+                it.copy(
+                    isBuildingServer = true,
+                    buildProgressMessage = "در حال دریافت سرور فعال از مخزن گیت‌هاب…",
+                    errorMessage = null
+                )
+            }
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val result = GitHubVpnManager.fetchExistingLiveServer(
+                token = token,
+                repoInput = repo,
+                useLocalProxy = isConnected
+            )
+            result.fold(
+                onSuccess = { live ->
+                    if (live.profiles.isNotEmpty()) {
+                        profileRepo.replaceSubscriptionProfiles(live.rawSubscriptionUrl, live.profiles)
+                        val saved = profileRepo.getAllOnce()
+                            .firstOrNull { it.rawUri == live.profiles.first().rawUri }
+                        if (saved != null) {
+                            profileRepo.select(saved.id)
+                            settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+                        }
+                    }
+                    _githubState.update {
+                        it.copy(
+                            isBuildingServer = false,
+                            buildProgressMessage = "سرور گیت‌هاب دریافت و انتخاب شد (${live.tunnelHost})",
+                            liveServer = live
+                        )
+                    }
+                    showBanner("سرور فعال گیت‌هاب وارد لیست و انتخاب شد")
+                },
+                onFailure = { err ->
+                    val msg = err.message ?: "سرور فعالی در گیت‌هاب یافت نشد"
+                    _githubState.update {
+                        it.copy(
+                            isBuildingServer = false,
+                            buildProgressMessage = "",
+                            errorMessage = msg
+                        )
+                    }
+                    showBanner(msg)
+                }
+            )
+        }
+    }
+
+    fun stopGitHubVpnServer(token: String) {
+        val live = _githubState.value.liveServer ?: return
+        val runId = live.runId ?: return
+        viewModelScope.launch {
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val res = GitHubVpnManager.stopGitHubServerRun(
+                token = token,
+                repoFullName = live.repoFullName,
+                runId = runId,
+                useLocalProxy = isConnected
+            )
+            res.fold(
+                onSuccess = {
+                    _githubState.update {
+                        it.copy(
+                            liveServer = null,
+                            buildProgressMessage = "سرور گیت‌هاب (Run #$runId) متوقف شد"
+                        )
+                    }
+                    showBanner("سرور گیت‌هاب متوقف شد")
+                },
+                onFailure = { err ->
+                    showBanner(err.message ?: "خطا در توقف سرور گیت‌هاب")
+                }
+            )
+        }
+    }
+
+    fun createOrUpdateGitHubGist(token: String, includeFreshWarp: Boolean) {
+        if (_githubState.value.isCreatingGist) return
+        viewModelScope.launch {
+            val currentSettings = uiState.value.settings
+            settingsRepo.setGitHubCredentials(token, currentSettings.githubRepo)
+            _githubState.update { it.copy(isCreatingGist = true, errorMessage = null) }
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val result = GitHubVpnManager.createOrUpdateGistSubscription(
+                token = token,
+                existingGistId = currentSettings.githubGistId,
+                profiles = uiState.value.profiles,
+                includeFreshWarp = includeFreshWarp,
+                useLocalProxy = isConnected
+            )
+            result.fold(
+                onSuccess = { gist ->
+                    settingsRepo.setGitHubGistId(gist.gistId)
+                    _githubState.update {
+                        it.copy(
+                            isCreatingGist = false,
+                            gistResult = gist
+                        )
+                    }
+                    showBanner("لینک اشتراک GitHub Gist با ${gist.serverCount} سرور ساخته شد")
+                },
+                onFailure = { err ->
+                    val msg = err.message ?: "خطا در ساخت اشتراک Gist"
+                    _githubState.update { it.copy(isCreatingGist = false, errorMessage = msg) }
+                    showBanner(msg)
+                }
+            )
+        }
+    }
+
+    fun searchAndImportFromGitHub(query: String) {
+        if (_githubState.value.isSearchingRepos) return
+        viewModelScope.launch {
+            _githubState.update { it.copy(isSearchingRepos = true, errorMessage = null) }
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val result = GitHubVpnManager.searchAndCollectGitHubServers(
+                query = query,
+                useLocalProxy = isConnected
+            )
+            result.fold(
+                onSuccess = { repos ->
+                    val allCollected = repos.flatMap { it.profiles }.distinctBy { it.rawUri }
+                    if (allCollected.isNotEmpty()) {
+                        profileRepo.insertAll(allCollected)
+                        val fastest = allCollected.minByOrNull { it.latencyMs ?: Long.MAX_VALUE }
+                        if (fastest != null) {
+                            profileRepo.getAllOnce().firstOrNull { it.rawUri == fastest.rawUri }?.let {
+                                profileRepo.select(it.id)
+                                settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+                            }
+                        }
+                    }
+                    _githubState.update {
+                        it.copy(
+                            isSearchingRepos = false,
+                            discoveredRepos = repos
+                        )
+                    }
+                    showBanner("${allCollected.size} سرور سالم از ${repos.size} مخزن گیت‌هاب اضافه شد")
+                },
+                onFailure = { err ->
+                    val msg = err.message ?: "خطا در جستجوی مخازن گیت‌هاب"
+                    _githubState.update { it.copy(isSearchingRepos = false, errorMessage = msg) }
+                    showBanner(msg)
+                }
+            )
+        }
+    }
+
     fun runStartupInternetDiagnostic() {
         viewModelScope.launch {
             val startedAt = System.currentTimeMillis()
@@ -542,7 +990,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _startupDiagnostic.update {
                     if (it.isScanning) it.copy(
                         activeStepIndex = 1,
-                        summaryMessage = "بررسی DNS امن و وضعیت دسترسی اینستاگرام…"
+                        summaryMessage = "بررسی DNS امن و محدودیت‌های اینترنت…"
                     ) else it
                 }
                 kotlinx.coroutines.delay(560L)
@@ -591,7 +1039,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!currentSelectedReachable) {
                         profileRepo.select(fastestProfile.id)
                     }
-                    settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
                 }
             }
 
@@ -607,10 +1054,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 !netCheck.isOnline -> StartupActionRecommendation.OFFLINE
                 fastestProfile != null -> StartupActionRecommendation.CONNECT_SELECTED_SERVER
                 netCheck.cloudflareEdgeReachable -> StartupActionRecommendation.GENERATE_AND_CONNECT_WARP
-                else -> {
-                    settingsRepo.setVpnMode(VpnMode.DPI_FRAGMENT_DOH)
-                    StartupActionRecommendation.CONNECT_ANTI_DPI_DOH
-                }
+                else -> StartupActionRecommendation.CONNECT_ANTI_DPI_DOH
             }
 
             val summary = when (recommendation) {
@@ -622,12 +1066,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "سریع‌ترین سرور با پینگ ${fastestMs}ms آماده اتصال است: ${fastestProfile?.name}"
                 StartupActionRecommendation.GENERATE_AND_CONNECT_WARP ->
                     if (netCheck.instagramBlocked == true) {
-                        "اینستاگرام روی این اینترنت مسدود است؛ آماده ساخت و اتصال فوری به Cloudflare WARP."
+                        "اینترنت دارای محدودیت است؛ آماده کشف خودکار و اتصال فوری به VPN."
                     } else {
-                        "اینترنت پایدار است (${netCheck.directLatencyMs ?: "--"}ms)؛ آماده اتصال با Cloudflare WARP."
+                        "اینترنت پایدار است (${netCheck.directLatencyMs ?: "--"}ms)؛ آماده اتصال با هسته هوشمند."
                     }
                 StartupActionRecommendation.CONNECT_ANTI_DPI_DOH ->
-                    "دسترسی Cloudflare محدود است؛ حالت ضد فیلتر TLS Fragment + DoH برای شما تنظیم شد."
+                    "دسترسی مستقیم محدود است؛ هسته هوشمند تمام روش‌های عبور را خودکار آزمایش می‌کند."
             }
 
             _startupDiagnostic.value = StartupDiagnosticState(
@@ -718,6 +1162,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val isGeneratingWarp: Boolean,
         val startupDiagnostic: StartupDiagnosticState,
         val startupDismissed: Boolean
+    )
+
+    private data class AiStatusSnapshot(
+        val isLoading: Boolean,
+        val errorMessage: String?,
+        val isSelfUpgrading: Boolean,
+        val lastUpgradePlan: AiUpgradePlan?
+    )
+
+    private data class AiSnapshot(
+        val selectedPersona: AiExpertPersona,
+        val messages: List<AiChatMessage>,
+        val streamingText: String,
+        val isLoading: Boolean,
+        val errorMessage: String?,
+        val isSelfUpgrading: Boolean,
+        val lastUpgradePlan: AiUpgradePlan?
     )
 
     private data class AuxSnapshot(

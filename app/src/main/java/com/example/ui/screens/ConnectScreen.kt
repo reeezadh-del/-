@@ -469,7 +469,8 @@ fun ConnectScreen(
                 }
             }
 
-            val hasActiveForeignServer = (uiState.settings.vpnMode == VpnMode.PROXY_CHAIN && uiState.selectedProfile != null) ||
+            val hasActiveForeignServer = uiState.settings.vpnMode == VpnMode.AI_AUTO_DISCOVERY ||
+                (uiState.settings.vpnMode == VpnMode.PROXY_CHAIN && uiState.selectedProfile != null) ||
                 (uiState.settings.vpnMode == VpnMode.AUTO_BEST_SERVER && uiState.profiles.isNotEmpty()) ||
                 (uiState.settings.vpnMode == VpnMode.DOUBLE_WARP_CHAIN && uiState.profiles.any { it.protocol == ProxyProtocol.WIREGUARD })
 
@@ -489,7 +490,7 @@ fun ConnectScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "سرور خارجی انتخاب نشده است — برای دسترسی کامل به اینستاگرام و تغییر کشور، روی «WARP سریع» بزنید یا سرور اضافه کنید.",
+                            text = "سرور خارجی انتخاب نشده است — برای دسترسی آزاد و تغییر IP، روی «WARP سریع» بزنید یا حالت «هوش مصنوعی خودارتقاگر» را انتخاب کنید.",
                             style = MaterialTheme.typography.bodySmall,
                             color = SaffronAmber
                         )

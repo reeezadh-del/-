@@ -38,10 +38,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Home
@@ -81,10 +83,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.ai.configureAppCheck
 import com.example.model.ConnectionState
 import com.example.ui.MainViewModel
 import com.example.ui.StartupActionRecommendation
+import com.example.ui.screens.AiHubScreen
 import com.example.ui.screens.ConnectScreen
+import com.example.ui.screens.GitHubServerScreen
 import com.example.ui.screens.ProfilesScreen
 import com.example.ui.screens.SplitTunnelScreen
 import com.example.ui.screens.StartupLoadingScreen
@@ -108,6 +113,7 @@ private sealed class NavTab(
     val unselectedIcon: ImageVector
 ) {
     data object Connect : NavTab("connect", "اتصال", Icons.Filled.Home, Icons.Outlined.Home)
+    data object AiHub : NavTab("ai_hub", "هوش مصنوعی", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
     data object Profiles : NavTab("profiles", "سرورها", Icons.Filled.Dns, Icons.Outlined.Dns)
     data object SplitTunnel : NavTab("split_tunnel", "برنامه‌ها", Icons.Filled.Apps, Icons.Outlined.Apps)
     data object Tools : NavTab("tools", "ابزارها", Icons.Filled.Build, Icons.Outlined.Build)
@@ -116,6 +122,7 @@ private sealed class NavTab(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureAppCheck(this, intent)
         enableEdgeToEdge()
         setContent {
             SeparNetTheme {
@@ -250,7 +257,7 @@ fun SeparNetAppRoot(
         }
 
         val tabs = remember {
-            listOf(NavTab.Connect, NavTab.Profiles, NavTab.SplitTunnel, NavTab.Tools)
+            listOf(NavTab.Connect, NavTab.AiHub, NavTab.Profiles, NavTab.SplitTunnel, NavTab.Tools)
         }
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
@@ -339,6 +346,23 @@ fun SeparNetAppRoot(
                                     }
                                 )
                             }
+                            composable(NavTab.AiHub.route) {
+                                AiHubScreen(
+                                    uiState = uiState,
+                                    onRunSelfUpgrade = viewModel::runAiSelfUpgrade,
+                                    onAutoDiscoverConnect = {
+                                        viewModel.prepareAiAutoDiscoveryMode()
+                                        val s = latestConnState
+                                        if (s == ConnectionState.Disconnected || s is ConnectionState.Error) {
+                                            latestToggleConnection()
+                                        }
+                                    },
+                                    onSelectPersona = viewModel::selectAiPersona,
+                                    onSendChatMessage = viewModel::sendAiChatMessage,
+                                    onClearChat = viewModel::clearAiChat,
+                                    onDismissAiError = viewModel::dismissAiError
+                                )
+                            }
                             composable(NavTab.Profiles.route) {
                                 ProfilesScreen(
                                     uiState = uiState,
@@ -351,7 +375,37 @@ fun SeparNetAppRoot(
                                     onTestAll = viewModel::testAllProfiles,
                                     onDeleteProfile = viewModel::deleteProfile,
                                     onGenerateWarp = { viewModel.generateAndSelectWarp() },
-                                    onImportPublicFeed = viewModel::importPublicCommunityFeed
+                                    onImportPublicFeed = viewModel::importPublicCommunityFeed,
+                                    onOpenGitHubBuilder = {
+                                        navController.navigate("github_builder") {
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                )
+                            }
+                            composable("github_builder") {
+                                GitHubServerScreen(
+                                    uiState = uiState,
+                                    onBack = { navController.popBackStack() },
+                                    onDeployServer = viewModel::deployAndStartGitHubVpnServer,
+                                    onFetchExistingServer = viewModel::fetchExistingGitHubLiveServer,
+                                    onStopServer = viewModel::stopGitHubVpnServer,
+                                    onConnectNow = {
+                                        val s = latestConnState
+                                        if (s == ConnectionState.Disconnected || s is ConnectionState.Error) {
+                                            latestToggleConnection()
+                                        }
+                                        navController.navigate(NavTab.Connect.route) {
+                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    },
+                                    onCreateGist = viewModel::createOrUpdateGitHubGist,
+                                    onSearchRepos = viewModel::searchAndImportFromGitHub,
+                                    onDismissError = viewModel::dismissGitHubError
                                 )
                             }
                             composable(NavTab.SplitTunnel.route) {
@@ -413,11 +467,11 @@ private fun SeparGlassBottomBar(
                 shape = barShape
             )
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 6.dp, vertical = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceAround,
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             tabs.forEach { tab ->
@@ -425,21 +479,21 @@ private fun SeparGlassBottomBar(
                 val interactionSource = remember { MutableInteractionSource() }
                 Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .clickable(
                             interactionSource = interactionSource,
                             indication = ripple(bounded = true, color = SkyCyanGlow),
                             onClick = { onSelectTab(tab) }
                         )
                         .minimumInteractiveComponentSize()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
                         .testTag("nav_${tab.route}"),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .then(
                                 if (selected) {
@@ -464,14 +518,14 @@ private fun SeparGlassBottomBar(
                             imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
                             contentDescription = tab.label,
                             tint = if (selected) Color.White else TextMuted,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = tab.label,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         ),
                         color = if (selected) Color.White else TextMuted,

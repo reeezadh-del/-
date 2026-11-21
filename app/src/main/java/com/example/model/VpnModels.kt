@@ -1,6 +1,10 @@
 package com.example.model
 
 enum class VpnMode(val titleFa: String, val subtitleFa: String) {
+    AI_AUTO_DISCOVERY(
+        titleFa = "هوش مصنوعی خودارتقاگر (کشف تمام روش‌ها)",
+        subtitleFa = "تست خودکار تمام پروتکل‌ها، WARP تمیز، مخازن آزاد و تکه‌تکه‌سازی TLS تا برقراری اتصال"
+    ),
     PROXY_CHAIN(
         titleFa = "تونل سرور انتخاب‌شده + DoH",
         subtitleFa = "اتصال از طریق سرور انتخابی (VLESS، Hysteria2، TUIC، WireGuard، SSH و…)"
@@ -33,7 +37,7 @@ sealed class ConnectionState {
 
 data class VpnTelemetry(
     val state: ConnectionState = ConnectionState.Disconnected,
-    val activeMode: VpnMode = VpnMode.DPI_FRAGMENT_DOH,
+    val activeMode: VpnMode = VpnMode.AI_AUTO_DISCOVERY,
     val connectedSinceMs: Long = 0L,
     val rxBytes: Long = 0L,
     val txBytes: Long = 0L,

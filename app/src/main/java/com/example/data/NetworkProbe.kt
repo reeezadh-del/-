@@ -132,17 +132,17 @@ object NetworkProbe {
                     val finalHost = response.request.url.host.lowercase()
                     if (finalHost.contains("peyvandha") || finalHost.startsWith("10.10.34.")) {
                         return@withContext Result.failure(
-                            IllegalStateException("ترافیک اینستاگرام توسط فیلترینگ مسدود یا ریدایرکت شد")
+                            IllegalStateException("متصل نشد")
                         )
                     }
                     if (!finalHost.endsWith("instagram.com") && !finalHost.endsWith("facebook.com")) {
                         return@withContext Result.failure(
-                            IllegalStateException("پاسخ از سرور غیرمعتبر دریافت شد ($finalHost)")
+                            IllegalStateException("متصل نشد")
                         )
                     }
                     if (response.code !in 200..499) {
                         return@withContext Result.failure(
-                            IllegalStateException("خطای HTTP ${response.code} هنگام باز کردن اینستاگرام")
+                            IllegalStateException("متصل نشد")
                         )
                     }
                     val snippet = response.body?.charStream()?.let { reader ->
@@ -155,18 +155,18 @@ object NetworkProbe {
                         snippet.contains("10.10.34.", ignoreCase = true)
                     ) {
                         return@withContext Result.failure(
-                            IllegalStateException("صفحه مسدودسازی داخلی شناسایی شد")
+                            IllegalStateException("متصل نشد")
                         )
                     }
                     if (response.code == 200 && snippet.isBlank()) {
                         return@withContext Result.failure(
-                            IllegalStateException("بدنه صفحه اینستاگرام خالی بود")
+                            IllegalStateException("متصل نشد")
                         )
                     }
                 }
             } catch (e: Exception) {
                 return@withContext Result.failure(
-                    IllegalStateException("لود نشدن سایت اینستاگرام: ${e.message ?: e.javaClass.simpleName}", e)
+                    IllegalStateException("متصل نشد", e)
                 )
             }
 
