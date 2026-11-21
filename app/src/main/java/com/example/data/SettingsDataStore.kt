@@ -24,6 +24,7 @@ data class UserSettings(
     val tlsFragmentEnabled: Boolean = true,
     val fragmentSizeBytes: Int = 24,
     val fragmentDelayMs: Int = 12,
+    val multiplexEnabled: Boolean = false,
     val bypassedPackages: Set<String> = emptySet()
 ) {
     fun resolveActiveDnsUrl(): String {
@@ -55,6 +56,7 @@ class SettingsRepository(private val context: Context) {
         val TLS_FRAGMENT_ENABLED = booleanPreferencesKey("tls_fragment_enabled")
         val FRAGMENT_SIZE_BYTES = intPreferencesKey("fragment_size_bytes")
         val FRAGMENT_DELAY_MS = intPreferencesKey("fragment_delay_ms")
+        val MULTIPLEX_ENABLED = booleanPreferencesKey("multiplex_enabled")
         val BYPASSED_PACKAGES = stringSetPreferencesKey("bypassed_packages")
     }
 
@@ -67,6 +69,7 @@ class SettingsRepository(private val context: Context) {
             tlsFragmentEnabled = prefs[Keys.TLS_FRAGMENT_ENABLED] ?: true,
             fragmentSizeBytes = prefs[Keys.FRAGMENT_SIZE_BYTES] ?: 24,
             fragmentDelayMs = prefs[Keys.FRAGMENT_DELAY_MS] ?: 12,
+            multiplexEnabled = prefs[Keys.MULTIPLEX_ENABLED] ?: false,
             bypassedPackages = prefs[Keys.BYPASSED_PACKAGES] ?: emptySet()
         )
     }
@@ -92,6 +95,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setTlsFragmentEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.TLS_FRAGMENT_ENABLED] = enabled }
+    }
+
+    suspend fun setMultiplexEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.MULTIPLEX_ENABLED] = enabled }
     }
 
     suspend fun setFragmentParams(sizeBytes: Int, delayMs: Int) {

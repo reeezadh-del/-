@@ -152,4 +152,268 @@ class ExampleRobolectricTest {
         assertTrue(tlsFragObj.getBoolean("fragment"))
         assertEquals("200ms", tlsFragObj.getString("fragment_fallback_delay"))
     }
+
+    @Test
+    fun `parse new circumvention protocols and wireguard conf`() {
+        val hy2 = ConfigUriParser.parseSingle(
+            "hy2://secret123@hy.example.com:8443?sni=edge.example.com&obfs=salamander&obfs-password=obfspass&upmbps=50&downmbps=100&insecure=1#FastHY2"
+        )
+        assertNotNull(hy2)
+        assertEquals(ProxyProtocol.HYSTERIA2, hy2!!.protocol)
+        assertEquals("FastHY2", hy2.name)
+        assertEquals("salamander", hy2.obfsType)
+        assertEquals("obfspass", hy2.obfsPassword)
+
+        val tuic = ConfigUriParser.parseSingle(
+            "tuic://11111111-1111-1111-1111-111111111111:tuicpass@tuic.example.com:443?sni=cdn.example.com&congestion_control=bbr&udp_relay_mode=quic#MyTUIC"
+        )
+        assertNotNull(tuic)
+        assertEquals(ProxyProtocol.TUIC, tuic!!.protocol)
+        assertEquals("11111111-1111-1111-1111-111111111111", tuic.username)
+        assertEquals("tuicpass", tuic.passwordOrUuid)
+
+        val wgUri = ConfigUriParser.parseSingle(
+            "wireguard://privKeyBase64@162.159.192.1:2408?publickey=pubKeyBase64&address=172.16.0.2/32&mtu=1280&reserved=1,2,3#WarpNode"
+        )
+        assertNotNull(wgUri)
+        assertEquals(ProxyProtocol.WIREGUARD, wgUri!!.protocol)
+        assertEquals("privKeyBase64", wgUri.passwordOrUuid)
+        assertEquals("pubKeyBase64", wgUri.realityPublicKey)
+
+        val wgConfText = """
+            [Interface]
+            PrivateKey = confPrivKey
+            Address = 10.0.0.2/32
+            MTU = 1320
+
+            [Peer]
+            PublicKey = confPubKey
+            PresharedKey = confPsk
+            Endpoint = 198.51.100.50:51820
+        """.trimIndent()
+        val wgConfProfiles = ConfigUriParser.parseBulk(wgConfText)
+        assertEquals(1, wgConfProfiles.size)
+        assertEquals(ProxyProtocol.WIREGUARD, wgConfProfiles[0].protocol)
+        assertEquals("198.51.100.50", wgConfProfiles[0].host)
+        assertEquals(51820, wgConfProfiles[0].port)
+        assertEquals("confPsk", wgConfProfiles[0].obfsPassword)
+
+        val ssh = ConfigUriParser.parseSingle("ssh://ubuntu:sshpass@203.0.113.5:2222#MySSH")
+        assertNotNull(ssh)
+        assertEquals(ProxyProtocol.SSH, ssh!!.protocol)
+        assertEquals("ubuntu", ssh.username)
+        assertEquals("sshpass", ssh.passwordOrUuid)
+        assertEquals(2222, ssh.port)
+
+        val anytls = ConfigUriParser.parseSingle("anytls://anypass@any.example.com:443?sni=www.cloudflare.com&fp=chrome#MyAnyTLS")
+        assertNotNull(anytls)
+        assertEquals(ProxyProtocol.ANYTLS, anytls!!.protocol)
+        assertEquals("anypass", anytls.passwordOrUuid)
+        assertEquals("www.cloudflare.com", anytls.sni)
+    }
+
+    @Test
+    fun `singbox config builder generates hy2 tuic wireguard ssh anytls urltest and h2mux`() {
+        val baseSettings = com.example.data.UserSettings(
+            vpnMode = com.example.model.VpnMode.PROXY_CHAIN,
+            multiplexEnabled = true
+        )
+
+        // 1. Hysteria2
+        val hy2 = ConfigUriParser.parseSingle(
+            "hy2://secret123@hy.example.com:8443?sni=edge.example.com&obfs=salamander&obfs-password=obfspass&upmbps=40&downmbps=80#FastHY2"
+        )!!
+        val hy2Obj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(baseSettings, hy2, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("hysteria2", hy2Obj.getString("type"))
+        assertEquals(40, hy2Obj.getInt("up_mbps"))
+        assertEquals("salamander", hy2Obj.getJSONObject("obfs").getString("type"))
+
+        // 2. TUIC
+        val tuic = ConfigUriParser.parseSingle(
+            "tuic://11111111-1111-1111-1111-111111111111:tuicpass@tuic.example.com:443?sni=cdn.example.com#MyTUIC"
+        )!!
+        val tuicObj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(baseSettings, tuic, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("tuic", tuicObj.getString("type"))
+        assertTrue(tuicObj.getBoolean("zero_rtt_handshake"))
+
+        // 3. WireGuard endpoint
+        val wg = ConfigUriParser.parseSingle(
+            "wireguard://privKey@162.159.192.1:2408?publickey=pubKey&reserved=10,20,30#Warp"
+        )!!
+        val wgRoot = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(baseSettings, wg, 0)
+        )
+        val wgEp = wgRoot.getJSONArray("endpoints").getJSONObject(0)
+        assertEquals("wireguard", wgEp.getString("type"))
+        assertEquals("proxy", wgEp.getString("tag"))
+        assertEquals(3, wgEp.getJSONArray("peers").getJSONObject(0).getJSONArray("reserved").length())
+
+        // 4. SSH
+        val ssh = ConfigUriParser.parseSingle("ssh://root:pw@203.0.113.5:22#SshTunnel")!!
+        val sshObj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(baseSettings, ssh, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("ssh", sshObj.getString("type"))
+        assertEquals("root", sshObj.getString("user"))
+
+        // 5. AnyTLS + H2Mux on VLESS WS
+        val anytls = ConfigUriParser.parseSingle("anytls://anypass@any.example.com:443?sni=any.example.com#Any")!!
+        val anyObj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(baseSettings, anytls, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("anytls", anyObj.getString("type"))
+        assertEquals(5, anyObj.getInt("min_idle_session"))
+
+        val vlessWs = ConfigUriParser.parseSingle(
+            "vless://44444444-4444-4444-4444-444444444444@cdn.example.com:443?security=tls&sni=cdn.example.com&type=ws#MuxVless"
+        )!!
+        val muxObj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(baseSettings, vlessWs, 0)
+        ).getJSONArray("outbounds").getJSONObject(0).getJSONObject("multiplex")
+        assertTrue(muxObj.getBoolean("enabled"))
+        assertEquals("h2mux", muxObj.getString("protocol"))
+        assertTrue(muxObj.getBoolean("padding"))
+
+        // 6. AUTO_BEST_SERVER (urltest pool)
+        val autoSettings = baseSettings.copy(vpnMode = com.example.model.VpnMode.AUTO_BEST_SERVER)
+        val autoRoot = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(
+                settings = autoSettings,
+                profile = null,
+                localSocksAntiDpiPort = 0,
+                allProfiles = listOf(hy2, tuic, ssh)
+            )
+        )
+        assertEquals("proxy", autoRoot.getJSONObject("route").getString("final"))
+        val autoOutbounds = autoRoot.getJSONArray("outbounds")
+        val urltestObj = (0 until autoOutbounds.length())
+            .map { autoOutbounds.getJSONObject(it) }
+            .first { it.getString("type") == "urltest" }
+        assertEquals("proxy", urltestObj.getString("tag"))
+        assertEquals(3, urltestObj.getJSONArray("outbounds").length())
+        assertEquals("https://www.instagram.com/", urltestObj.getString("url"))
+    }
+
+    @Test
+    fun `warp provisioner matches RFC 7748 x25519 vector and parses registration json`() {
+        // RFC 7748 Section 6.1 Alice private key & expected X25519(a, 9) public key
+        val alicePrivHex = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"
+        val expectedPubHex = "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"
+        val alicePriv = alicePrivHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val basePoint = ByteArray(32).apply { this[0] = 9 }
+        val actualPub = com.example.data.WarpProvisioner.x25519(alicePriv, basePoint)
+        val actualPubHex = actualPub.joinToString("") { "%02x".format(it) }
+        assertEquals(expectedPubHex, actualPubHex)
+
+        val keyPair = com.example.data.WarpProvisioner.generateWireGuardKeyPair()
+        assertEquals(32, Base64.decode(keyPair.privateKeyBase64, Base64.DEFAULT).size)
+        assertEquals(32, Base64.decode(keyPair.publicKeyBase64, Base64.DEFAULT).size)
+
+        // client_id base64 for bytes [10, 20, 30] -> "ChQe"
+        val clientIdB64 = Base64.encodeToString(byteArrayOf(10, 20, 30), Base64.NO_WRAP)
+        val sampleJson = """
+            {
+              "config": {
+                "client_id": "$clientIdB64",
+                "interface": { "addresses": { "v4": "172.16.0.2", "v6": "2606:4700:110::2" } },
+                "peers": [{ "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=" }]
+              }
+            }
+        """.trimIndent()
+        val warpProfile = com.example.data.WarpProvisioner.parseWarpRegistrationJson(
+            jsonText = sampleJson,
+            privateKeyBase64 = keyPair.privateKeyBase64,
+            endpointHost = "162.159.192.1",
+            endpointPort = 2408
+        )
+        assertNotNull(warpProfile)
+        assertEquals(ProxyProtocol.WIREGUARD, warpProfile!!.protocol)
+        assertTrue(warpProfile.extraParam.contains("reserved=10,20,30"))
+        assertTrue(warpProfile.extraParam.contains("address=172.16.0.2/32"))
+    }
+
+    @Test
+    fun `parse and build hysteria1 shadowtls naive mport and double warp chain`() {
+        val hy1 = ConfigUriParser.parseSingle(
+            "hysteria://hy1.example.com:443?auth=hy1pass&upmbps=30&downmbps=60&obfs=xplus&obfsParam=obfskey&peer=cdn.example.com#HY1"
+        )
+        assertNotNull(hy1)
+        assertEquals(ProxyProtocol.HYSTERIA, hy1!!.protocol)
+
+        val ssShadowTls = ConfigUriParser.parseSingle(
+            "ss://YWVzLTI1Ni1nY206c3NwYXNz@stls.example.com:443?plugin=shadow-tls;host=www.bing.com;passwd=stlssecret#SS_STLS"
+        )
+        assertNotNull(ssShadowTls)
+        assertEquals("shadowtls", ssShadowTls!!.obfsType)
+        assertEquals("stlssecret", ssShadowTls.obfsPassword)
+
+        val naive = ConfigUriParser.parseSingle(
+            "naive+quic://nuser:npass@naive.example.com:443?sni=naive.example.com#NaiveQuic"
+        )
+        assertNotNull(naive)
+        assertEquals(ProxyProtocol.NAIVE, naive!!.protocol)
+
+        val hy2Mport = ConfigUriParser.parseSingle(
+            "hy2://p@hy2.example.com:443?mport=20000-30000&sni=hy2.example.com#HoppingHY2"
+        )
+        assertNotNull(hy2Mport)
+
+        val settings = com.example.data.UserSettings(vpnMode = com.example.model.VpnMode.PROXY_CHAIN)
+
+        val hy1Obj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(settings, hy1, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("hysteria", hy1Obj.getString("type"))
+        assertEquals("hy1pass", hy1Obj.getString("auth_str"))
+
+        val ssRoot = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(settings, ssShadowTls, 0)
+        )
+        val ssOutbounds = ssRoot.getJSONArray("outbounds")
+        val ssObj = (0 until ssOutbounds.length()).map { ssOutbounds.getJSONObject(it) }
+            .first { it.getString("type") == "shadowsocks" }
+        val stlsObj = (0 until ssOutbounds.length()).map { ssOutbounds.getJSONObject(it) }
+            .first { it.getString("type") == "shadowtls" }
+        assertEquals(stlsObj.getString("tag"), ssObj.getString("detour"))
+        assertEquals(3, stlsObj.getInt("version"))
+
+        val naiveObj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(settings, naive, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("naive", naiveObj.getString("type"))
+        assertTrue(naiveObj.getBoolean("quic"))
+
+        val mportObj = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(settings, hy2Mport, 0)
+        ).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("20000:30000", mportObj.getJSONArray("server_ports").getString(0))
+        assertEquals("30s", mportObj.getString("hop_interval"))
+
+        // Double WARP chain: relay server + WARP endpoint detour
+        val warp = ConfigUriParser.parseSingle(
+            "wireguard://privKey@162.159.192.1:2408?publickey=pubKey&reserved=1,2,3#WARP"
+        )!!
+        val doubleWarpSettings = settings.copy(vpnMode = com.example.model.VpnMode.DOUBLE_WARP_CHAIN)
+        val hy2MportNonNull = hy2Mport!!
+        val doubleRoot = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(
+                settings = doubleWarpSettings,
+                profile = hy2MportNonNull,
+                localSocksAntiDpiPort = 0,
+                allProfiles = listOf(hy2MportNonNull, warp)
+            )
+        )
+        val warpEp = doubleRoot.getJSONArray("endpoints").getJSONObject(0)
+        assertEquals("proxy", warpEp.getString("tag"))
+        assertEquals("relay-server", warpEp.getString("detour"))
+        val relayOutbound = doubleRoot.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("relay-server", relayOutbound.getString("tag"))
+        assertEquals("hysteria2", relayOutbound.getString("type"))
+    }
 }
+
+

@@ -9,7 +9,15 @@ enum class ProxyProtocol(val displayName: String, val supportsDirectTunnel: Bool
     VLESS("VLESS", true),
     VMESS("VMess", true),
     TROJAN("Trojan", true),
-    SHADOWSOCKS("SS", true)
+    SHADOWSOCKS("SS", true),
+    HYSTERIA2("Hysteria2", true),
+    HYSTERIA("Hysteria1", true),
+    TUIC("TUIC", true),
+    WIREGUARD("WireGuard", true),
+    SHADOWTLS("ShadowTLS", true),
+    NAIVE("NaiveProxy", true),
+    SSH("SSH", true),
+    ANYTLS("AnyTLS", true)
 }
 
 @Entity(tableName = "proxy_profiles")
@@ -32,6 +40,9 @@ data class ProxyProfile(
     val realityShortId: String = "",
     val alpn: String = "",
     val allowInsecure: Boolean = false,
+    val obfsType: String = "",
+    val obfsPassword: String = "",
+    val extraParam: String = "",
     val rawUri: String,
     val subscriptionSource: String = "",
     val latencyMs: Long? = null,

@@ -28,9 +28,12 @@ import androidx.compose.material.icons.outlined.Router
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -87,6 +90,7 @@ fun ConnectScreen(
     onOpenProfiles: () -> Unit,
     onOpenTools: () -> Unit,
     onCheckExitIp: () -> Unit,
+    onQuickWarpConnect: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -281,6 +285,67 @@ fun ConnectScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // One-Tap Free Cloudflare WARP (Turbo Alternative) Card
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                borderColor = CyanSecondary.copy(alpha = 0.4f)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.Bolt,
+                                contentDescription = null,
+                                tint = CyanSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "اتصال فوری رایگان (Cloudflare WARP)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = TextPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "ساخت آنی کلید وایرگارد WARP + اسکن آی‌پی تمیز (به جای سرورهای بسته Turbo VPN)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Button(
+                        onClick = onQuickWarpConnect,
+                        enabled = !uiState.isGeneratingWarp,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyanSecondary,
+                            contentColor = ObsidianBg
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("quick_warp_connect_button")
+                    ) {
+                        if (uiState.isGeneratingWarp) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = ObsidianBg
+                            )
+                        } else {
+                            Text("ساخت و اتصال", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // Real Exit IP & Location Verification Card
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -346,7 +411,10 @@ fun ConnectScreen(
                     }
                 }
 
-                if (uiState.selectedProfile == null || uiState.settings.vpnMode != VpnMode.PROXY_CHAIN) {
+                val hasActiveForeignServer = (uiState.settings.vpnMode == VpnMode.PROXY_CHAIN && uiState.selectedProfile != null) ||
+                    (uiState.settings.vpnMode == VpnMode.AUTO_BEST_SERVER && uiState.profiles.isNotEmpty()) ||
+                    (uiState.settings.vpnMode == VpnMode.DOUBLE_WARP_CHAIN && uiState.profiles.any { it.protocol == com.example.model.ProxyProtocol.WIREGUARD })
+                if (!hasActiveForeignServer) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Column(
                         modifier = Modifier
@@ -379,7 +447,7 @@ fun ConnectScreen(
                                 .fillMaxWidth()
                                 .testTag("go_to_servers_cta")
                         ) {
-                            Text("افزودن یا انتخاب سرور خارجی (VLESS / VMess / Trojan)", color = SaffronAmber)
+                            Text("افزودن یا انتخاب سرور خارجی (VLESS / HY2 / WG / SSH)", color = SaffronAmber)
                         }
                     }
                 }
@@ -450,7 +518,7 @@ fun ConnectScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "حالت عبور از فیلترینگ",
+                        text = "روش اتصال و عبور از فیلترینگ",
                         style = MaterialTheme.typography.titleMedium,
                         color = TextPrimary
                     )
@@ -458,8 +526,9 @@ fun ConnectScreen(
 
                 VpnMode.entries.forEach { mode ->
                     val selected = uiState.settings.vpnMode == mode
-                    val proxyWarning = mode == VpnMode.PROXY_CHAIN &&
-                        (uiState.selectedProfile == null || !uiState.selectedProfile.protocol.supportsDirectTunnel)
+                    val proxyWarning = (mode == VpnMode.PROXY_CHAIN && uiState.selectedProfile == null) ||
+                        (mode == VpnMode.AUTO_BEST_SERVER && uiState.profiles.isEmpty()) ||
+                        (mode == VpnMode.DOUBLE_WARP_CHAIN && uiState.profiles.none { it.protocol == com.example.model.ProxyProtocol.WIREGUARD })
 
                     Row(
                         modifier = Modifier
@@ -497,7 +566,7 @@ fun ConnectScreen(
                             )
                             Text(
                                 text = if (proxyWarning) {
-                                    "ابتدا یک سرور VLESS / VMess / Trojan / SS / SOCKS5 از تب «سرورها» انتخاب کنید"
+                                    "ابتدا حداقل یک سرور در تب «سرورها» اضافه کنید"
                                 } else {
                                     mode.subtitleFa
                                 },

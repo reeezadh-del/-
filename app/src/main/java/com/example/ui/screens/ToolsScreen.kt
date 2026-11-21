@@ -79,6 +79,7 @@ fun ToolsScreen(
     onSelectDnsPreset: (String) -> Unit,
     onSaveCustomDoh: (String) -> Unit,
     onToggleTlsFragment: (Boolean) -> Unit,
+    onToggleMultiplex: (Boolean) -> Unit,
     onUpdateFragmentParams: (Int, Int) -> Unit,
     onRunNetworkScan: () -> Unit,
     onClearLogs: () -> Unit,
@@ -201,6 +202,38 @@ fun ToolsScreen(
                             activeTrackColor = CyanSecondary
                         ),
                         modifier = Modifier.testTag("slider_fragment_delay")
+                    )
+                }
+            }
+
+            // 1.5 Multiplex (H2Mux + Padding) Control
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "تجمیع و پدینگ بسته‌ها (H2Mux + Padding)",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "تغییر الگوی اندازه بسته‌ها و کاهش تاخیر هندشیک روی VLESS / VMess / Trojan / SS",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = uiState.settings.multiplexEnabled,
+                        onCheckedChange = onToggleMultiplex,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = OnEmerald,
+                            checkedTrackColor = EmeraldPrimary
+                        ),
+                        modifier = Modifier.testTag("switch_multiplex")
                     )
                 }
             }

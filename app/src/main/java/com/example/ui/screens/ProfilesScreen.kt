@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Router
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +60,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.data.WarpProvisioner
 import com.example.model.ProxyProfile
 import com.example.model.ProxyProtocol
 import com.example.ui.MainUiState
@@ -88,6 +90,8 @@ fun ProfilesScreen(
     onTestProfile: (ProxyProfile) -> Unit,
     onTestAll: () -> Unit,
     onDeleteProfile: (Long) -> Unit,
+    onGenerateWarp: () -> Unit = {},
+    onImportPublicFeed: (WarpProvisioner.PublicFeedPreset) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -107,7 +111,7 @@ fun ProfilesScreen(
                 color = TextPrimary
             )
             Text(
-                text = "تونل کامل دستگاه با پشتیبانی از VLESS (TLS/REALITY)، VMess، Trojan، Shadowsocks، SOCKS5 و لینک اشتراک",
+                text = "تونل کامل با پشتیبانی از VLESS، VMess، Trojan، Hysteria 1/2، TUIC، WireGuard/WARP، ShadowTLS، NaiveProxy، SSH و AnyTLS",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
@@ -170,6 +174,35 @@ fun ProfilesScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = onGenerateWarp,
+                enabled = !uiState.isGeneratingWarp,
+                border = BorderStroke(1.dp, CyanSecondary.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("generate_warp_button")
+            ) {
+                if (uiState.isGeneratingWarp) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = CyanSecondary
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Bolt,
+                        contentDescription = null,
+                        tint = CyanSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("ساخت اکانت رایگان Cloudflare WARP + اسکن آی‌پی تمیز", color = CyanSecondary)
+            }
+
             if (uiState.isImportingSubscription) {
                 Spacer(modifier = Modifier.height(10.dp))
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -213,7 +246,7 @@ fun ProfilesScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "می‌توانید لینک اشتراک، کانفیگ VLESS / VMess / Trojan / SS یا سرور SOCKS5 / HTTP خود را اضافه کنید. بدون سرور نیز حالت «ضد فیلتر هوشمند TLS + DoH» در صفحه اتصال کاملاً فعال است.",
+                            text = "می‌توانید لینک اشتراک، کانفیگ VLESS / Hysteria2 / TUIC / WireGuard (.conf) / SSH / AnyTLS یا سرور SOCKS5 / HTTP اضافه کنید. بدون سرور نیز حالت «ضد فیلتر هوشمند» فعال است.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -274,6 +307,10 @@ fun ProfilesScreen(
             },
             onAddManual = { name, host, port, proto, user, pass ->
                 onAddManualProxy(name, host, port, proto, user, pass)
+                showAddDialog = false
+            },
+            onSelectPublicFeed = { feed ->
+                onImportPublicFeed(feed)
                 showAddDialog = false
             }
         )
@@ -409,7 +446,8 @@ private fun ProfileCard(
 private fun AddProfileDialog(
     onDismiss: () -> Unit,
     onImportLink: (String) -> Unit,
-    onAddManual: (String, String, String, ProxyProtocol, String, String) -> Unit
+    onAddManual: (String, String, String, ProxyProtocol, String, String) -> Unit,
+    onSelectPublicFeed: (WarpProvisioner.PublicFeedPreset) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var rawLinkInput by remember { mutableStateOf("") }
@@ -441,119 +479,166 @@ private fun AddProfileDialog(
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("لینک / اشتراک") }
+                        text = { Text("لینک", maxLines = 1) }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("سرور دستی") }
+                        text = { Text("دستی", maxLines = 1) }
+                    )
+                    Tab(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        text = { Text("سرور آزاد", maxLines = 1) }
                     )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (selectedTab == 0) {
-                    OutlinedTextField(
-                        value = rawLinkInput,
-                        onValueChange = { rawLinkInput = it },
-                        label = { Text("لینک کانفیگ یا Subscription URL") },
-                        placeholder = { Text("vless://... یا https://sub.example.com/...") },
-                        minLines = 3,
-                        maxLines = 5,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("import_uri_input")
-                    )
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = manualProtocol == ProxyProtocol.SOCKS5,
-                            onClick = {
-                                manualProtocol = ProxyProtocol.SOCKS5
-                                if (manualPort == "8080") manualPort = "1080"
-                            },
-                            label = { Text("SOCKS5") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmeraldContainer,
-                                selectedLabelColor = EmeraldPrimary
-                            )
-                        )
-                        FilterChip(
-                            selected = manualProtocol == ProxyProtocol.HTTP,
-                            onClick = {
-                                manualProtocol = ProxyProtocol.HTTP
-                                if (manualPort == "1080") manualPort = "8080"
-                            },
-                            label = { Text("HTTP") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmeraldContainer,
-                                selectedLabelColor = EmeraldPrimary
-                            )
+                when (selectedTab) {
+                    0 -> {
+                        OutlinedTextField(
+                            value = rawLinkInput,
+                            onValueChange = { rawLinkInput = it },
+                            label = { Text("لینک کانفیگ، WireGuard .conf یا Subscription") },
+                            placeholder = { Text("vless:// hy2:// hysteria:// tuic:// wireguard:// shadowtls:// naive+https:// ssh:// anytls:// [Interface]...") },
+                            minLines = 3,
+                            maxLines = 6,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("import_uri_input")
                         )
                     }
+                    1 -> {
+                        val manualProtocols = listOf(
+                            ProxyProtocol.SSH to "22",
+                            ProxyProtocol.HYSTERIA2 to "443",
+                            ProxyProtocol.HYSTERIA to "443",
+                            ProxyProtocol.NAIVE to "443",
+                            ProxyProtocol.SHADOWTLS to "443",
+                            ProxyProtocol.ANYTLS to "443",
+                            ProxyProtocol.SOCKS5 to "1080",
+                            ProxyProtocol.HTTP to "8080"
+                        )
+                        androidx.compose.foundation.lazy.LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(manualProtocols.size) { index ->
+                                val (proto, defaultPort) = manualProtocols[index]
+                                FilterChip(
+                                    selected = manualProtocol == proto,
+                                    onClick = {
+                                        manualProtocol = proto
+                                        manualPort = defaultPort
+                                    },
+                                    label = { Text(proto.displayName) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EmeraldContainer,
+                                        selectedLabelColor = EmeraldPrimary
+                                    )
+                                )
+                            }
+                        }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = manualName,
-                        onValueChange = { manualName = it },
-                        label = { Text("نام دلخواه (اختیاری)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
-                            value = manualHost,
-                            onValueChange = { manualHost = it },
-                            label = { Text("آدرس IP یا دامنه") },
+                            value = manualName,
+                            onValueChange = { manualName = it },
+                            label = { Text("نام دلخواه (اختیاری)") },
                             singleLine = true,
-                            modifier = Modifier.weight(2f)
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        OutlinedTextField(
-                            value = manualPort,
-                            onValueChange = { manualPort = it },
-                            label = { Text("پورت") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f)
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = manualHost,
+                                onValueChange = { manualHost = it },
+                                label = { Text("آدرس IP یا دامنه") },
+                                singleLine = true,
+                                modifier = Modifier.weight(2f)
+                            )
+                            OutlinedTextField(
+                                value = manualPort,
+                                onValueChange = { manualPort = it },
+                                label = { Text("پورت") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = manualUser,
+                                onValueChange = { manualUser = it },
+                                label = { Text("نام کاربری / SNI") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = manualPass,
+                                onValueChange = { manualPass = it },
+                                label = { Text("رمز عبور") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = manualUser,
-                            onValueChange = { manualUser = it },
-                            label = { Text("نام کاربری") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                    else -> {
+                        Text(
+                            text = "دریافت خودکار سرورهای عمومی و رایگان از مخازن متن‌باز گیت‌هاب:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
                         )
-                        OutlinedTextField(
-                            value = manualPass,
-                            onValueChange = { manualPass = it },
-                            label = { Text("رمز عبور") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            WarpProvisioner.PUBLIC_COMMUNITY_FEEDS.forEach { feed ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(ObsidianSurfaceElevated)
+                                        .border(1.dp, ObsidianCardBorder, RoundedCornerShape(12.dp))
+                                        .clickable { onSelectPublicFeed(feed) }
+                                        .padding(12.dp)
+                                        .testTag("public_feed_${feed.id}")
+                                ) {
+                                    Text(
+                                        text = feed.titleFa,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = EmeraldPrimary
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = feed.subtitleFa,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    if (selectedTab == 0) {
-                        onImportLink(rawLinkInput)
-                    } else {
-                        onAddManual(manualName, manualHost, manualPort, manualProtocol, manualUser, manualPass)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = EmeraldPrimary,
-                    contentColor = OnEmerald
-                ),
-                modifier = Modifier.testTag("confirm_add_profile")
-            ) {
-                Text("ذخیره")
+            if (selectedTab != 2) {
+                Button(
+                    onClick = {
+                        if (selectedTab == 0) {
+                            onImportLink(rawLinkInput)
+                        } else {
+                            onAddManual(manualName, manualHost, manualPort, manualProtocol, manualUser, manualPass)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = EmeraldPrimary,
+                        contentColor = OnEmerald
+                    ),
+                    modifier = Modifier.testTag("confirm_add_profile")
+                ) {
+                    Text("ذخیره")
+                }
             }
         },
         dismissButton = {

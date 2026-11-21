@@ -11,6 +11,7 @@ import com.example.data.ConfigUriParser
 import com.example.data.NetworkProbe
 import com.example.data.UserSettings
 import com.example.data.VpnRuntimeState
+import com.example.data.WarpProvisioner
 import com.example.model.ConnectionState
 import com.example.model.InstalledAppInfo
 import com.example.model.ProxyProfile
@@ -46,7 +47,8 @@ data class MainUiState(
     val logs: List<TunnelLogEntry> = emptyList(),
     val bannerMessage: String? = null,
     val exitIpInfo: NetworkProbe.ExitIpInfo? = null,
-    val isCheckingExitIp: Boolean = false
+    val isCheckingExitIp: Boolean = false,
+    val isGeneratingWarp: Boolean = false
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -64,6 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _bannerMessage = MutableStateFlow<String?>(null)
     private val _manualExitIpInfo = MutableStateFlow<NetworkProbe.ExitIpInfo?>(null)
     private val _isCheckingExitIp = MutableStateFlow(false)
+    private val _isGeneratingWarp = MutableStateFlow(false)
 
     private val baseDataFlow = combine(
         VpnRuntimeState.telemetry,
@@ -78,9 +81,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val ipStateFlow = combine(
         VpnRuntimeState.exitIpInfo,
         _manualExitIpInfo,
-        _isCheckingExitIp
-    ) { runtimeIp, manualIp, checking ->
-        (runtimeIp ?: manualIp) to checking
+        _isCheckingExitIp,
+        _isGeneratingWarp
+    ) { runtimeIp, manualIp, checking, generatingWarp ->
+        Triple(runtimeIp ?: manualIp, checking, generatingWarp)
     }
 
     private val auxStateFlow = combine(
@@ -94,7 +98,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ipStateFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
-        val ipPair = values[7] as Pair<NetworkProbe.ExitIpInfo?, Boolean>
+        val ipTriple = values[7] as Triple<NetworkProbe.ExitIpInfo?, Boolean, Boolean>
         AuxSnapshot(
             apps = values[0] as List<InstalledAppInfo>,
             appsLoading = values[1] as Boolean,
@@ -103,8 +107,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isTesting = values[4] as Boolean,
             isImporting = values[5] as Boolean,
             banner = values[6] as String?,
-            exitIpInfo = ipPair.first,
-            isCheckingExitIp = ipPair.second
+            exitIpInfo = ipTriple.first,
+            isCheckingExitIp = ipTriple.second,
+            isGeneratingWarp = ipTriple.third
         )
     }
 
@@ -125,7 +130,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             logs = base.logs,
             bannerMessage = aux.banner,
             exitIpInfo = aux.exitIpInfo,
-            isCheckingExitIp = aux.isCheckingExitIp
+            isCheckingExitIp = aux.isCheckingExitIp,
+            isGeneratingWarp = aux.isGeneratingWarp
         )
     }.stateIn(
         scope = viewModelScope,
@@ -189,6 +195,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setMultiplexEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepo.setMultiplexEnabled(enabled)
+        }
+    }
+
     fun setFragmentParams(sizeBytes: Int, delayMs: Int) {
         viewModelScope.launch {
             settingsRepo.setFragmentParams(sizeBytes, delayMs)
@@ -216,7 +228,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val parsed = ConfigUriParser.parseBulk(trimmed)
             if (parsed.isEmpty()) {
-                showBanner("فرمت لینک معتبر نبود (پشتیبانی از VLESS, VMess, Trojan, SS, SOCKS5, HTTP)")
+                showBanner("فرمت ورودی معتبر نبود (پشتیبانی از VLESS, VMess, Trojan, SS, Hysteria2, TUIC, WireGuard, SSH, AnyTLS, SOCKS5)")
             } else {
                 profileRepo.insertAll(parsed)
                 val firstInserted = profileRepo.getAllOnce().firstOrNull()
@@ -252,8 +264,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.model.ProxyProtocol.VMESS -> "vmess"
             com.example.model.ProxyProtocol.TROJAN -> "trojan"
             com.example.model.ProxyProtocol.SHADOWSOCKS -> "ss"
+            com.example.model.ProxyProtocol.HYSTERIA2 -> "hy2"
+            com.example.model.ProxyProtocol.HYSTERIA -> "hysteria"
+            com.example.model.ProxyProtocol.TUIC -> "tuic"
+            com.example.model.ProxyProtocol.WIREGUARD -> "wireguard"
+            com.example.model.ProxyProtocol.SHADOWTLS -> "shadowtls"
+            com.example.model.ProxyProtocol.NAIVE -> "naive+https"
+            com.example.model.ProxyProtocol.SSH -> "ssh"
+            com.example.model.ProxyProtocol.ANYTLS -> "anytls"
         }
-        val creds = if (username.isNotBlank()) "$username:$password@" else ""
+        val creds = if (username.isNotBlank()) "$username:$password@" else if (password.isNotBlank()) "$password@" else ""
         val rawUri = "$scheme://$creds$cleanHost:$port#${name.ifBlank { cleanHost }}"
 
         viewModelScope.launch {
@@ -298,6 +318,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             )
         }
+    }
+
+    fun generateAndSelectWarp(onReadyToConnect: (() -> Unit)? = null) {
+        if (_isGeneratingWarp.value) return
+        viewModelScope.launch {
+            _isGeneratingWarp.value = true
+            val isConnected = uiState.value.telemetry.state == ConnectionState.Connected
+            val result = WarpProvisioner.registerWarpAccount(useLocalProxyIfConnected = isConnected)
+            _isGeneratingWarp.value = false
+            result.fold(
+                onSuccess = { warpProfile ->
+                    val id = profileRepo.insert(warpProfile)
+                    profileRepo.select(id)
+                    settingsRepo.setVpnMode(VpnMode.PROXY_CHAIN)
+                    showBanner("اکانت رایگان Cloudflare WARP روی آی‌پی تمیز ${warpProfile.host} ساخته و انتخاب شد")
+                    onReadyToConnect?.invoke()
+                },
+                onFailure = { err ->
+                    showBanner("خطا در ساخت اکانت WARP: ${err.message ?: "خطای شبکه"}")
+                }
+            )
+        }
+    }
+
+    fun importPublicCommunityFeed(feed: WarpProvisioner.PublicFeedPreset) {
+        fetchSubscription(feed.url)
     }
 
     fun selectProfile(profile: ProxyProfile) {
@@ -490,6 +536,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val isImporting: Boolean,
         val banner: String?,
         val exitIpInfo: NetworkProbe.ExitIpInfo?,
-        val isCheckingExitIp: Boolean
+        val isCheckingExitIp: Boolean,
+        val isGeneratingWarp: Boolean
     )
 }

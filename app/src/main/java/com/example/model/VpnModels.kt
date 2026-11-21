@@ -1,13 +1,21 @@
 package com.example.model
 
 enum class VpnMode(val titleFa: String, val subtitleFa: String) {
+    PROXY_CHAIN(
+        titleFa = "تونل سرور انتخاب‌شده + DoH",
+        subtitleFa = "اتصال از طریق سرور انتخابی (VLESS، Hysteria2، TUIC، WireGuard، SSH و…)"
+    ),
+    AUTO_BEST_SERVER(
+        titleFa = "اتصال هوشمند خودکار (Auto Failover)",
+        subtitleFa = "تست هم‌زمان همه سرورهای ذخیره‌شده و سوییچ خودکار روی سریع‌ترین سرور سالم"
+    ),
+    DOUBLE_WARP_CHAIN(
+        titleFa = "تونل ترکیبی (سرور شما + Cloudflare WARP)",
+        subtitleFa = "عبور از فیلترینگ با سرور انتخابی و تغییر IP خروج به Cloudflare WARP تمیز"
+    ),
     DPI_FRAGMENT_DOH(
         titleFa = "ضد فیلتر هوشمند (TLS Fragment + DoH)",
-        subtitleFa = "عبور مستقیم از فیلترینگ SNI و DNS بدون نیاز به سرور خارجی"
-    ),
-    PROXY_CHAIN(
-        titleFa = "تونل کامل سرور خارجی + DoH",
-        subtitleFa = "ارسال تمام ترافیک دستگاه از طریق سرور VLESS / VMess / Trojan / SS / SOCKS5"
+        subtitleFa = "عبور مستقیم از فیلترینگ SNI و DNS بدون سرور خارجی (مناسب سایت‌های دارای محدودیت SNI)"
     ),
     DOH_ONLY(
         titleFa = "فقط DNS رمزنگاری‌شده (ضد مسمومیت DNS)",

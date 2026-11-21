@@ -255,7 +255,15 @@ fun SeparNetAppRoot(
                                 onSelectMode = viewModel::setVpnMode,
                                 onOpenProfiles = { navigateToTab(NavTab.Profiles) },
                                 onOpenTools = { navigateToTab(NavTab.Tools) },
-                                onCheckExitIp = viewModel::checkExitIp
+                                onCheckExitIp = viewModel::checkExitIp,
+                                onQuickWarpConnect = {
+                                    viewModel.generateAndSelectWarp {
+                                        val s = uiState.telemetry.state
+                                        if (s == ConnectionState.Disconnected || s is ConnectionState.Error) {
+                                            onToggleConnection()
+                                        }
+                                    }
+                                }
                             )
                         }
                         composable(NavTab.Profiles.route) {
@@ -268,7 +276,9 @@ fun SeparNetAppRoot(
                                     viewModel.testSingleProfile(p.id, p.host, p.port)
                                 },
                                 onTestAll = viewModel::testAllProfiles,
-                                onDeleteProfile = viewModel::deleteProfile
+                                onDeleteProfile = viewModel::deleteProfile,
+                                onGenerateWarp = { viewModel.generateAndSelectWarp() },
+                                onImportPublicFeed = viewModel::importPublicCommunityFeed
                             )
                         }
                         composable(NavTab.SplitTunnel.route) {
@@ -285,6 +295,7 @@ fun SeparNetAppRoot(
                                 onSelectDnsPreset = viewModel::setDnsPreset,
                                 onSaveCustomDoh = viewModel::setCustomDohUrl,
                                 onToggleTlsFragment = viewModel::setTlsFragmentEnabled,
+                                onToggleMultiplex = viewModel::setMultiplexEnabled,
                                 onUpdateFragmentParams = viewModel::setFragmentParams,
                                 onRunNetworkScan = viewModel::runCleanIpNetworkScan,
                                 onClearLogs = viewModel::clearLogs

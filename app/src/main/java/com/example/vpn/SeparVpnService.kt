@@ -94,20 +94,30 @@ class SeparVpnService : VpnService() {
             latestBypassedPackages = settings.bypassedPackages
             var effectiveMode = settings.vpnMode
             val dao = AppDatabase.getInstance(applicationContext).proxyProfileDao()
+            val allProfiles = dao.getAllProfilesOnce()
             var selectedProfile = dao.getSelectedProfile()
 
-            if (selectedProfile == null) {
-                val firstSaved = dao.getAllProfilesOnce().firstOrNull()
-                if (firstSaved != null) {
-                    dao.selectProfile(firstSaved.id)
-                    selectedProfile = firstSaved.copy(isSelected = true)
-                    effectiveMode = VpnMode.PROXY_CHAIN
-                    SettingsRepository(applicationContext).setVpnMode(VpnMode.PROXY_CHAIN)
+            if (effectiveMode == VpnMode.AUTO_BEST_SERVER) {
+                if (allProfiles.isEmpty()) {
+                    throw IllegalStateException("برای اتصال هوشمند خودکار، ابتدا حداقل یک سرور در تب «سرورها» اضافه کنید")
                 }
-            }
-
-            if (effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile == null) {
-                throw IllegalStateException("هیچ سروری انتخاب نشده است؛ ابتدا از تب «سرورها» یک کانفیگ VLESS / VMess / Trojan / SS / SOCKS5 اضافه کنید")
+            } else if (effectiveMode == VpnMode.DOUBLE_WARP_CHAIN) {
+                if (allProfiles.none { it.protocol == com.example.model.ProxyProtocol.WIREGUARD }) {
+                    throw IllegalStateException("برای تونل ترکیبی، ابتدا «ساخت اکانت رایگان Cloudflare WARP» را بزنید")
+                }
+            } else {
+                if (selectedProfile == null) {
+                    val firstSaved = allProfiles.firstOrNull()
+                    if (firstSaved != null) {
+                        dao.selectProfile(firstSaved.id)
+                        selectedProfile = firstSaved.copy(isSelected = true)
+                        effectiveMode = VpnMode.PROXY_CHAIN
+                        SettingsRepository(applicationContext).setVpnMode(VpnMode.PROXY_CHAIN)
+                    }
+                }
+                if (effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile == null) {
+                    throw IllegalStateException("هیچ سروری انتخاب نشده است؛ ابتدا از تب «سرورها» یک کانفیگ اضافه کنید")
+                }
             }
 
             val effectiveSettings = settings.copy(vpnMode = effectiveMode)
@@ -136,7 +146,8 @@ class SeparVpnService : VpnService() {
             val configJson = SingBoxConfigBuilder.buildConfig(
                 settings = effectiveSettings,
                 profile = selectedProfile,
-                localSocksAntiDpiPort = antiDpiSocksPort
+                localSocksAntiDpiPort = antiDpiSocksPort,
+                allProfiles = allProfiles
             )
 
             Libbox.checkConfig(configJson)
@@ -165,10 +176,15 @@ class SeparVpnService : VpnService() {
             val probeResult = com.example.data.NetworkProbe.verifyInstagramLoadThroughTunnel()
             val exitInfo = probeResult.getOrElse { err ->
                 throw IllegalStateException(
-                    if (effectiveMode == VpnMode.PROXY_CHAIN) {
-                        "اینستاگرام با این سرور باز نشد — اتصال لغو شد (${err.message ?: "خطای شبکه"}). سرور دیگری در تب سرورها انتخاب کنید."
-                    } else {
-                        "اینستاگرام بدون سرور خارجی باز نشد! برای باز شدن اینستاگرام یک کانفیگ معتبر در تب «سرورها» اضافه کنید."
+                    when (effectiveMode) {
+                        VpnMode.PROXY_CHAIN ->
+                            "اینستاگرام با این سرور باز نشد — اتصال لغو شد (${err.message ?: "خطای شبکه"}). سرور دیگری در تب سرورها انتخاب کنید."
+                        VpnMode.AUTO_BEST_SERVER ->
+                            "هیچ‌یک از سرورها نتوانست اینستاگرام را باز کند (${err.message ?: "خطای شبکه"})."
+                        VpnMode.DOUBLE_WARP_CHAIN ->
+                            "تونل ترکیبی WARP نتوانست اینستاگرام را باز کند (${err.message ?: "خطای شبکه"})."
+                        else ->
+                            "اینستاگرام بدون سرور خارجی باز نشد! برای باز شدن اینستاگرام یک کانفیگ معتبر در تب «سرورها» اضافه کنید."
                     }
                 )
             }
@@ -183,10 +199,12 @@ class SeparVpnService : VpnService() {
                 VpnRuntimeState.appendLog("VPN", "سایت اینستاگرام از طریق تونل با موفقیت لود شد")
             }
 
-            val serverLabel = if (effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile != null) {
-                "${selectedProfile.name} (${selectedProfile.protocol.displayName})"
-            } else {
-                null
+            val serverLabel = when {
+                effectiveMode == VpnMode.AUTO_BEST_SERVER -> "انتخاب هوشمند (${allProfiles.size} سرور)"
+                effectiveMode == VpnMode.DOUBLE_WARP_CHAIN -> "تونل ترکیبی + Cloudflare WARP"
+                effectiveMode == VpnMode.PROXY_CHAIN && selectedProfile != null ->
+                    "${selectedProfile.name} (${selectedProfile.protocol.displayName})"
+                else -> null
             }
 
             VpnRuntimeState.updateSessionInfo(

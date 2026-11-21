@@ -18,7 +18,7 @@ class ProtocolConverters {
         ProxyProtocol.entries.firstOrNull { it.name == value } ?: ProxyProtocol.VLESS
 }
 
-@Database(entities = [ProxyProfile::class], version = 2, exportSchema = false)
+@Database(entities = [ProxyProfile::class], version = 4, exportSchema = false)
 @TypeConverters(ProtocolConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun proxyProfileDao(): ProxyProfileDao

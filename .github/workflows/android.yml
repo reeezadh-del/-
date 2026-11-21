@@ -42,7 +42,7 @@ jobs:
         run: gradle :app:testDebugUnitTest --no-daemon
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug -PtargetAbis=arm64-v8a --no-daemon
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
@@ -60,7 +60,7 @@ jobs:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon
+          gradle :app:assembleRelease -PtargetAbis=arm64-v8a --no-daemon
 
       - name: Upload Release APK Artifact
         if: ${{ secrets.KEYSTORE_BASE64 != '' }}

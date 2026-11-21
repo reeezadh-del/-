@@ -19,3 +19,15 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+-keep class io.nekohasekai.libbox.** { *; }
+-keep class go.** { *; }
+-dontwarn io.nekohasekai.libbox.**
+-dontwarn go.**
+
+-keep class * extends androidx.room.RoomDatabase
+-keep @androidx.room.Entity class *
+-keep @androidx.room.Dao interface * { *; }
+-keepclassmembers class com.example.model.** { *; }
+-keepclassmembers class com.example.data.** { *; }
+

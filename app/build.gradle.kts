@@ -20,6 +20,16 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    val targetAbisProp = providers.gradleProperty("targetAbis").orNull
+    val abiList = if (!targetAbisProp.isNullOrBlank()) {
+      targetAbisProp.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    } else {
+      listOf("arm64-v8a", "x86_64")
+    }
+    ndk {
+      abiFilters += abiList
+    }
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -43,7 +53,8 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
@@ -53,6 +64,19 @@ android {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
+    }
+  }
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+    resources {
+      excludes += setOf(
+        "META-INF/*.kotlin_module",
+        "META-INF/LICENSE*",
+        "META-INF/NOTICE*",
+        "DebugProbesKt.bin"
+      )
     }
   }
   compileOptions {
