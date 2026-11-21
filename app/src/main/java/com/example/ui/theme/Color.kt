@@ -2,26 +2,31 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Obsidian & Emerald Cyber-Persian Palette
-val ObsidianBg = Color(0xFF060C14)
-val ObsidianSurface = Color(0xFF0C1624)
-val ObsidianSurfaceElevated = Color(0xFF132236)
-val ObsidianCardBorder = Color(0xFF1E334A)
+// Midnight Cobalt & Luminous Cyan-Blue Palette (inspired by modern glass VPN UI)
+val ObsidianBg = Color(0xFF060C1E)
+val ObsidianSurface = Color(0xFF0E1733)
+val ObsidianSurfaceElevated = Color(0xFF162247)
+val ObsidianCardBorder = Color(0xFF26386B)
 
-val EmeraldPrimary = Color(0xFF14E8B5)
-val EmeraldPrimaryDark = Color(0xFF009E7A)
-val EmeraldContainer = Color(0xFF09362C)
-val OnEmerald = Color(0xFF022018)
+val ElectricBlue = Color(0xFF3A9BFF)
+val ElectricBlueDeep = Color(0xFF1C53C6)
+val SkyCyanGlow = Color(0xFF56D4FF)
+val ConnectedGreen = Color(0xFF22E58A)
 
-val CyanSecondary = Color(0xFF4CC9F0)
-val CyanContainer = Color(0xFF0C2E42)
+val EmeraldPrimary = Color(0xFF3B9CFF)
+val EmeraldPrimaryDark = Color(0xFF1A54CC)
+val EmeraldContainer = Color(0xFF172C59)
+val OnEmerald = Color(0xFFFFFFFF)
 
-val SaffronAmber = Color(0xFFFFB703)
-val SaffronContainer = Color(0xFF382804)
+val CyanSecondary = Color(0xFF4FD1FF)
+val CyanContainer = Color(0xFF11294E)
 
-val CoralError = Color(0xFFFF5A5F)
-val CoralContainer = Color(0xFF3D1116)
+val SaffronAmber = Color(0xFFFFBE2E)
+val SaffronContainer = Color(0xFF362A0B)
 
-val TextPrimary = Color(0xFFF0F6FC)
-val TextSecondary = Color(0xFF91A7BF)
-val TextMuted = Color(0xFF5D748D)
+val CoralError = Color(0xFFFF5E6C)
+val CoralContainer = Color(0xFF3B1321)
+
+val TextPrimary = Color(0xFFF3F7FF)
+val TextSecondary = Color(0xFF9AAAD0)
+val TextMuted = Color(0xFF61739E)
