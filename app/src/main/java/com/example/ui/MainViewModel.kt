@@ -647,6 +647,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val acc = StringBuilder()
             try {
                 AiCoreEngine.streamChat(
+                    context = getApplication(),
                     persona = persona,
                     historyPairs = historySnapshot,
                     userPrompt = prompt
@@ -674,7 +675,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 Log.e("MainViewModel", "AI chat failed", e)
-                _aiErrorMessage.value = "خطا در ارتباط با هسته هوش مصنوعی: ${e.message ?: "خطای ناشناخته"}"
+                _aiErrorMessage.value = AiCoreEngine.formatUserError(e)
             } finally {
                 _aiStreamingText.value = ""
                 _isAiLoading.value = false
@@ -707,7 +708,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 $recentLogs
             """.trimIndent()
 
-            val result = AiCoreEngine.generateSelfUpgradePlan(telemetryPrompt)
+            val result = AiCoreEngine.generateSelfUpgradePlan(getApplication(), telemetryPrompt)
             _isAiSelfUpgrading.value = false
             result.fold(
                 onSuccess = { plan ->
@@ -730,9 +731,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     showBanner("هسته VPN توسط هوش مصنوعی تحلیل و ارتقا یافت")
                 },
                 onFailure = { err ->
-                    val msg = err.message ?: "خطا در تحلیل و ارتقای هوشمند"
+                    val msg = AiCoreEngine.formatUserError(err)
                     _aiErrorMessage.value = msg
-                    showBanner(msg)
                 }
             )
         }

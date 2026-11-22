@@ -11,6 +11,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -69,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.ai.AiCoreEngine
 import com.example.ai.AiExpertPersona
 import com.example.ai.AiServicePortal
@@ -179,12 +181,23 @@ fun AiHubScreen(
                 containerColor = ObsidianSurface.copy(alpha = 0.94f),
                 borderColor = SkyCyanGlow.copy(alpha = 0.38f)
             ) {
+                val modeLabelFa = when (uiState.settings.vpnMode) {
+                    VpnMode.AI_AUTO_DISCOVERY -> "کشف خودکار"
+                    VpnMode.PROXY_CHAIN -> "پروکسی کامل"
+                    VpnMode.AUTO_BEST_SERVER -> "بهترین سرور"
+                    VpnMode.DOUBLE_WARP_CHAIN -> "دابل وارپ"
+                    VpnMode.DPI_FRAGMENT_DOH -> "ضد فیلتر DoH"
+                    VpnMode.DOH_ONLY -> "فقط DNS"
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             imageVector = Icons.Rounded.Psychology,
                             contentDescription = null,
@@ -215,9 +228,11 @@ fun AiHubScreen(
                         )
                     ) {
                         Text(
-                            text = if (uiState.settings.vpnMode == VpnMode.AI_AUTO_DISCOVERY) "کشف خودکار فعال" else uiState.settings.vpnMode.name,
+                            text = modeLabelFa,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                             color = if (uiState.settings.vpnMode == VpnMode.AI_AUTO_DISCOVERY) ConnectedGreen else TextSecondary,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
@@ -240,6 +255,7 @@ fun AiHubScreen(
                         onClick = onRunSelfUpgrade,
                         enabled = !uiState.isAiSelfUpgrading,
                         shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = ElectricBlue,
                             contentColor = Color.White
@@ -252,26 +268,33 @@ fun AiHubScreen(
                     ) {
                         if (uiState.isAiSelfUpgrading) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
                                 color = Color.White
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("در حال ارتقا…", maxLines = 1)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("در حال ارتقا…", fontSize = 12.sp, maxLines = 1, softWrap = false)
                         } else {
                             Icon(
                                 imageVector = Icons.Rounded.Tune,
                                 contentDescription = null,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("تحلیل و ارتقای هسته", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                text = "تحلیل و ارتقا",
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
 
                     OutlinedButton(
                         onClick = onAutoDiscoverConnect,
                         shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                         border = BorderStroke(1.dp, SkyCyanGlow.copy(alpha = 0.6f)),
                         modifier = Modifier
                             .weight(1f)
@@ -283,15 +306,17 @@ fun AiHubScreen(
                             imageVector = Icons.Rounded.Bolt,
                             contentDescription = null,
                             tint = SkyCyanGlow,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         val isBusy = uiState.telemetry.state == ConnectionState.Connecting ||
                             uiState.telemetry.state == ConnectionState.Connected
                         Text(
-                            text = if (isBusy) "متصل / در حال کشف" else "کشف روش و اتصال",
+                            text = if (isBusy) "اتصال برقرار" else "اتصال هوشمند",
                             color = SkyCyanGlow,
+                            fontSize = 12.sp,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -376,7 +401,7 @@ fun AiHubScreen(
                                 text = uiState.selectedAiPersona.subtitleFa,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextMuted,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }

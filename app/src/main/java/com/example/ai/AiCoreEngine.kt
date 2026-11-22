@@ -1,7 +1,9 @@
 package com.example.ai
 
+import android.content.Context
 import android.util.Log
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.content
@@ -119,11 +121,53 @@ object AiCoreEngine {
         )
     }
 
+    fun ensureFirebaseInitialized(context: Context) {
+        val appContext = context.applicationContext ?: context
+        if (FirebaseApp.getApps(appContext).isEmpty()) {
+            val initialized = runCatching { FirebaseApp.initializeApp(appContext) }.getOrNull()
+            if (initialized == null || FirebaseApp.getApps(appContext).isEmpty()) {
+                val appIdRes = appContext.resources.getIdentifier(
+                    "google_app_id",
+                    "string",
+                    appContext.packageName
+                )
+                val hasGoogleAppId = appIdRes != 0 &&
+                    runCatching { appContext.getString(appIdRes) }.getOrNull().orEmpty().isNotBlank()
+                if (!hasGoogleAppId) {
+                    throw IllegalStateException(
+                        "فایل app/google-services.json هنگام بیلد این نسخه در گیت‌هاب وجود نداشته است. لطفاً کل پروژه شامل app/google-services.json و debug.keystore.base64 را همگام‌سازی کرده و دوباره بیلد بگیرید."
+                    )
+                }
+                throw IllegalStateException(
+                    "مقداردهی Firebase انجام نشد. لطفاً برنامه را بسته و دوباره باز کنید یا با کلید امضای اصلی بیلد بگیرید."
+                )
+            }
+        }
+    }
+
+    fun formatUserError(error: Throwable): String {
+        val raw = error.message.orEmpty()
+        return when {
+            raw.contains("Default FirebaseApp is not initialized", ignoreCase = true) ->
+                "مقداردهی Firebase در این نسخه کامل نیست (احتمالاً app/google-services.json هنگام بیلد گیت‌هاب همگام نبوده است)."
+            raw.contains("403", ignoreCase = true) || raw.contains("App Check", ignoreCase = true) ||
+                raw.contains("attestation", ignoreCase = true) ->
+                "خطای تأیید App Check / امضای برنامه (۴۰۳). مطمئن شوید نسخه با debug.keystore.base64 اصلی پروژه در گیت‌هاب بیلد شده باشد."
+            raw.contains("network", ignoreCase = true) || raw.contains("Unable to resolve host", ignoreCase = true) ||
+                raw.contains("timeout", ignoreCase = true) ->
+                "ارتباط با سرور هوش مصنوعی برقرار نشد. ابتدا VPN را متصل کرده یا اینترنت را بررسی کنید."
+            raw.isNotBlank() -> raw
+            else -> "خطای ناشناخته در ارتباط با هسته هوش مصنوعی"
+        }
+    }
+
     fun streamChat(
+        context: Context,
         persona: AiExpertPersona,
         historyPairs: List<Pair<Boolean, String>>,
         userPrompt: String
     ): Flow<String> = flow {
+        ensureFirebaseInitialized(context)
         val model = if (persona == AiExpertPersona.FAST_LITE) chatModelLite else chatModelFlash
         val historyContents = buildList {
             add(content("user") { text("دستورالعمل سیستمی: ${persona.systemInstruction}") })
@@ -143,8 +187,9 @@ object AiCoreEngine {
         }
     }
 
-    suspend fun generateSelfUpgradePlan(telemetryPrompt: String): Result<AiUpgradePlan> {
+    suspend fun generateSelfUpgradePlan(context: Context, telemetryPrompt: String): Result<AiUpgradePlan> {
         return try {
+            ensureFirebaseInitialized(context)
             val response = withTimeout(45_000L) {
                 optimizerModel.generateContent(telemetryPrompt)
             }
@@ -174,7 +219,7 @@ object AiCoreEngine {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "AI self-upgrade analysis failed", e)
-            Result.failure(e)
+            Result.failure(IllegalStateException(formatUserError(e), e))
         }
     }
 }

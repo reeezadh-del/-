@@ -36,3 +36,6 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
 
+# Firebase AI Logic & App Check release safety
+-keep class com.google.firebase.** { *; }
+-keep class com.example.ai.** { *; }

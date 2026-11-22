@@ -438,6 +438,20 @@ class ExampleRobolectricTest {
         assertTrue(yaml.contains("vpn-live"))
         assertEquals(3, com.example.data.GitHubVpnManager.GitHubServerProtocol.entries.size)
     }
+
+    @Test
+    fun `ai core engine formats firebase and app check errors cleanly in persian`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        com.example.ai.AiCoreEngine.ensureFirebaseInitialized(context)
+        val initMsg = com.example.ai.AiCoreEngine.formatUserError(
+            IllegalStateException("Default FirebaseApp is not initialized in this process com.aistudio.separeazad.rkmxqv.")
+        )
+        assertTrue(initMsg.contains("google-services.json"))
+        val appCheckMsg = com.example.ai.AiCoreEngine.formatUserError(
+            IllegalStateException("HTTP 403 App Check token is invalid")
+        )
+        assertTrue(appCheckMsg.contains("debug.keystore.base64"))
+    }
 }
 
 
