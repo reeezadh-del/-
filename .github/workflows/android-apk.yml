@@ -31,35 +31,27 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare debug keystore & verify Firebase config
+      
+      - name: Restore and verify original debug keystore
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
         run: |
-          if [ ! -f app/google-services.json ]; then
-            echo "::error::app/google-services.json is missing! FirebaseApp will fail to initialize."
+          set -euo pipefail
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ] || [ -z "$DEBUG_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Missing keystore secrets"
             exit 1
           fi
-          if ! grep -q "com.aistudio.separeazad.rkmxqv" app/google-services.json; then
-            echo "::error::app/google-services.json does not contain com.aistudio.separeazad.rkmxqv."
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > debug.keystore
+          keytool -list -v -keystore debug.keystore -storepass "$DEBUG_KEYSTORE_PASSWORD" > /tmp/keystore-info.txt
+          ACTUAL_SHA1="$(awk -F': ' '/SHA1:/{print toupper($2); exit}' /tmp/keystore-info.txt)"
+          EXPECTED_SHA1="71:15:37:41:1F:7C:E2:DD:07:50:81:4C:33:C4:BF:70:3E:CF:CB:32"
+          echo "Debug keystore SHA-1: $ACTUAL_SHA1"
+          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "::error::SHA-1 mismatch"
             exit 1
           fi
-          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "$DEBUG_KEYSTORE_BASE64" | tr -d ' \n\r' | base64 -d > debug.keystore
-          elif [ -f debug.keystore.base64 ]; then
-            tr -d ' \n\r' < debug.keystore.base64 | base64 -d > debug.keystore
-          elif [ ! -f debug.keystore ]; then
-            echo "::warning::debug.keystore.base64 not found! Generating temporary keystore (signature will differ)."
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA1:|SHA256:"
+          echo "Original debug keystore verified."
 
       - name: Build APK
         run: gradle :app:assembleDebug -PtargetAbis=arm64-v8a --no-daemon --stacktrace
