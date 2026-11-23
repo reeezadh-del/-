@@ -26,13 +26,17 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Prepare debug.keystore & verify Firebase config
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ ! -f app/google-services.json ]; then
             echo "::error::app/google-services.json is missing! FirebaseApp will fail to initialize."
             exit 1
           fi
-          if [ -f debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | tr -d ' \n\r' | base64 -d > debug.keystore
+          elif [ -f debug.keystore.base64 ]; then
+            tr -d ' \n\r' < debug.keystore.base64 | base64 -d > debug.keystore
           else
             echo "::warning::debug.keystore.base64 not found! Generating temporary keystore (signature will differ)."
             keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
