@@ -32,11 +32,16 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +49,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -298,6 +305,100 @@ fun ConnectScreen(
                 state = connState,
                 onClick = onToggleConnection
             )
+
+            // Prominent Material 3 Connect / Disconnect Switch & Action Bar
+            val isConnecting = connState == ConnectionState.Connecting
+            val isDisconnecting = connState == ConnectionState.Disconnecting
+            val switchChecked = isConnected || isConnecting
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                cornerRadius = 20.dp,
+                containerColor = ObsidianSurface.copy(alpha = 0.94f),
+                borderColor = when {
+                    isConnected -> ConnectedGreen.copy(alpha = 0.55f)
+                    isConnecting -> SaffronAmber.copy(alpha = 0.55f)
+                    else -> ElectricBlue.copy(alpha = 0.45f)
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onToggleConnection,
+                        enabled = !isDisconnecting,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = when {
+                                isConnected -> Color(0xFFB4233C)
+                                isConnecting -> SaffronAmber
+                                else -> ElectricBlue
+                            },
+                            contentColor = if (isConnecting) Color(0xFF1A1200) else Color.White
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .minimumInteractiveComponentSize()
+                            .testTag("vpn_switch_button")
+                    ) {
+                        if (isConnecting || isDisconnecting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = if (isConnecting) Color(0xFF1A1200) else Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isDisconnecting) "در حال قطع…" else "لغو اتصال",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.PowerSettingsNew,
+                                contentDescription = if (isConnected) "قطع اتصال VPN" else "اتصال به VPN",
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isConnected) "قطع اتصال (Disconnect)" else "اتصال امن (Connect)",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = switchChecked,
+                        onCheckedChange = { onToggleConnection() },
+                        enabled = !isDisconnecting,
+                        thumbContent = {
+                            Icon(
+                                imageVector = if (switchChecked) Icons.Rounded.Check else Icons.Rounded.Close,
+                                contentDescription = if (switchChecked) "سرویس VPN روشن" else "سرویس VPN خاموش",
+                                modifier = Modifier.size(SwitchDefaults.IconSize)
+                            )
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = if (isConnected) ConnectedGreen else SaffronAmber,
+                            checkedIconColor = if (isConnected) Color(0xFF063B2C) else Color(0xFF362A0B),
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = ObsidianSurfaceElevated,
+                            uncheckedBorderColor = ObsidianCardBorder,
+                            uncheckedIconColor = ObsidianBg
+                        ),
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("vpn_master_switch")
+                    )
+                }
+            }
 
             // Connection / Instagram Verification Error Banner
             AnimatedVisibility(visible = connState is ConnectionState.Error) {

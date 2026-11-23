@@ -2,14 +2,25 @@ package com.example
 
 import android.content.Context
 import android.util.Base64
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.ConfigUriParser
+import com.example.model.ConnectionState
 import com.example.model.ProxyProtocol
+import com.example.model.VpnTelemetry
+import com.example.ui.MainUiState
+import com.example.ui.screens.ConnectScreen
+import com.example.ui.theme.SeparNetTheme
 import com.example.vpn.PacketUtils
 import com.example.vpn.UdpDnsPacket
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -18,6 +29,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class ExampleRobolectricTest {
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
 
     @Test
     fun `read app name from context`() {
@@ -451,6 +465,37 @@ class ExampleRobolectricTest {
             IllegalStateException("HTTP 403 App Check token is invalid")
         )
         assertTrue(appCheckMsg.contains("debug.keystore.base64"))
+    }
+
+    @Test
+    fun `connect screen displays material3 connect disconnect switch and triggers toggle`() {
+        var toggleCount = 0
+        composeTestRule.setContent {
+            SeparNetTheme {
+                ConnectScreen(
+                    uiState = MainUiState(
+                        telemetry = VpnTelemetry(state = ConnectionState.Disconnected)
+                    ),
+                    onToggleConnection = { toggleCount++ },
+                    onSelectMode = {},
+                    onOpenProfiles = {},
+                    onOpenTools = {},
+                    onCheckExitIp = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("vpn_connect_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("vpn_switch_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeTestRule.onNodeWithTag("vpn_master_switch")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(2, toggleCount)
     }
 }
 
