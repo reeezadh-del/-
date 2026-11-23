@@ -28,23 +28,37 @@ jobs:
       - name: Prepare debug.keystore & verify Firebase config
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          DEBUG_KEYSTORE_PASSWORD: ${{ secrets.DEBUG_KEYSTORE_PASSWORD }}
         run: |
+          set -euo pipefail
           if [ ! -f app/google-services.json ]; then
             echo "::error::app/google-services.json is missing! FirebaseApp will fail to initialize."
             exit 1
           fi
+          if ! grep -q "com.aistudio.separeazad.rkmxqv" app/google-services.json; then
+            echo "::error::app/google-services.json does not contain com.aistudio.separeazad.rkmxqv."
+            exit 1
+          fi
+          STORE_PASS="${DEBUG_KEYSTORE_PASSWORD:-android}"
           if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "$DEBUG_KEYSTORE_BASE64" | tr -d ' \n\r' | base64 -d > debug.keystore
+            printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d ' \n\r' | base64 -d > debug.keystore
           elif [ -f debug.keystore.base64 ]; then
             tr -d ' \n\r' < debug.keystore.base64 | base64 -d > debug.keystore
           else
-            echo "::warning::debug.keystore.base64 not found! Generating temporary keystore (signature will differ)."
-            keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            echo "::error::Neither DEBUG_KEYSTORE_BASE64 secret nor debug.keystore.base64 file was found."
+            exit 1
           fi
-          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA1:|SHA256:"
+          keytool -list -v -keystore debug.keystore -storepass "$STORE_PASS" -alias androiddebugkey > /tmp/keystore-info.txt
+          ACTUAL_SHA1="$(awk -F': ' '/SHA1:/{print toupper($2); exit}' /tmp/keystore-info.txt | tr -d ' \t\r')"
+          EXPECTED_SHA1="B5:27:58:87:76:73:14:99:A6:7D:9E:E0:B7:3A:4B:70:96:3B:30:EC"
+          echo "Debug keystore SHA-1: $ACTUAL_SHA1"
+          if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
+            echo "::error::SHA-1 mismatch (expected $EXPECTED_SHA1, got $ACTUAL_SHA1)"
+            exit 1
+          fi
 
       - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.3.1'
 
@@ -52,7 +66,17 @@ jobs:
         run: gradle :app:testDebugUnitTest --no-daemon
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug -PtargetAbis=arm64-v8a --no-daemon
+        run: gradle :app:assembleDebug -PtargetAbis=arm64-v8a --no-daemon --stacktrace
+
+      - name: Verify APK output & signing certificate
+        run: |
+          set -euo pipefail
+          APK_FILE="$(ls app/build/outputs/apk/debug/*.apk | head -n1)"
+          ls -lh "$APK_FILE"
+          APKSIGNER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -type f | sort -V | tail -n1)"
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$APK_FILE"
+          fi
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v7
