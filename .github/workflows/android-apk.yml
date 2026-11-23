@@ -45,7 +45,7 @@ jobs:
           printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > debug.keystore
           keytool -list -v -keystore debug.keystore -storepass "$DEBUG_KEYSTORE_PASSWORD" > /tmp/keystore-info.txt
           ACTUAL_SHA1="$(awk -F': ' '/SHA1:/{print toupper($2); exit}' /tmp/keystore-info.txt)"
-          EXPECTED_SHA1="71:15:37:41:1F:7C:E2:DD:07:50:81:4C:33:C4:BF:70:3E:CF:CB:32"
+          EXPECTED_SHA1="B5:27:58:87:76:73:14:99:A6:7D:9E:E0:B7:3A:4B:70:96:3B:30:EC"
           echo "Debug keystore SHA-1: $ACTUAL_SHA1"
           if [ "$ACTUAL_SHA1" != "$EXPECTED_SHA1" ]; then
             echo "::error::SHA-1 mismatch"
