@@ -1,7 +1,11 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -465,41 +470,109 @@ fun AiHubScreen(
                 // Error Banner (always propagated transparently)
                 AnimatedVisibility(visible = uiState.aiErrorMessage != null) {
                     val err = uiState.aiErrorMessage
+                    val debugToken = uiState.aiAppCheckDebugToken
                     if (err != null) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 10.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(14.dp))
                                 .background(CoralError.copy(alpha = 0.14f))
-                                .border(1.dp, CoralError.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .border(1.dp, CoralError.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
                                 .testTag("ai_error_banner"),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.ErrorOutline,
-                                contentDescription = null,
-                                tint = CoralError,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = err,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = CoralError,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = onDismissAiError,
-                                modifier = Modifier.size(32.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Close,
-                                    contentDescription = "بستن خطا",
+                                    imageVector = Icons.Outlined.ErrorOutline,
+                                    contentDescription = null,
                                     tint = CoralError,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .size(18.dp)
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = err,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = CoralError,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = onDismissAiError,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .minimumInteractiveComponentSize()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "بستن خطا",
+                                        tint = CoralError,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            if (!debugToken.isNullOrBlank()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(ObsidianSurface.copy(alpha = 0.85f))
+                                        .border(1.dp, ObsidianCardBorder, RoundedCornerShape(10.dp))
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "توکن دیباگ App Check این دستگاه (Firebase Console → App Check → Manage debug tokens):",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                    LtrText(
+                                        text = debugToken,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = JetBrainsMonoFontFamily
+                                        ),
+                                        color = SkyCyanGlow
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            cm?.setPrimaryClip(
+                                                ClipData.newPlainText("AppCheckDebugToken", debugToken)
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                "توکن دیباگ App Check کپی شد",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, SkyCyanGlow.copy(alpha = 0.55f)),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("ai_copy_debug_token_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.ContentCopy,
+                                            contentDescription = null,
+                                            tint = SkyCyanGlow,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "کپی توکن دیباگ App Check",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = SkyCyanGlow
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

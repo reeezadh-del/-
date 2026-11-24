@@ -11,6 +11,7 @@ import com.example.SeparApp
 import com.example.ai.AiCoreEngine
 import com.example.ai.AiExpertPersona
 import com.example.ai.AiUpgradePlan
+import com.example.ai.getDeviceAppCheckDebugSecret
 import com.example.data.ConfigUriParser
 import com.example.data.GitHubVpnManager
 import com.example.data.NetworkProbe
@@ -82,6 +83,7 @@ data class MainUiState(
     val aiStreamingText: String = "",
     val isAiLoading: Boolean = false,
     val aiErrorMessage: String? = null,
+    val aiAppCheckDebugToken: String? = null,
     val isAiSelfUpgrading: Boolean = false,
     val lastAiUpgradePlan: AiUpgradePlan? = null,
     val github: GitHubUiState = GitHubUiState()
@@ -134,6 +136,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _aiStreamingText = MutableStateFlow("")
     private val _isAiLoading = MutableStateFlow(false)
     private val _aiErrorMessage = MutableStateFlow<String?>(null)
+    private val _aiAppCheckDebugToken = MutableStateFlow<String?>(null)
     private val _isAiSelfUpgrading = MutableStateFlow(false)
     private val _lastAiUpgradePlan = MutableStateFlow<AiUpgradePlan?>(null)
     private val _githubState = MutableStateFlow(GitHubUiState())
@@ -175,10 +178,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val aiStatusSubFlow = combine(
         _isAiLoading,
         _aiErrorMessage,
+        _aiAppCheckDebugToken,
         _isAiSelfUpgrading,
         _lastAiUpgradePlan
-    ) { loading, error, upgrading, plan ->
-        AiStatusSnapshot(loading, error, upgrading, plan)
+    ) { loading, error, debugToken, upgrading, plan ->
+        AiStatusSnapshot(loading, error, debugToken, upgrading, plan)
     }
 
     private val aiStateFlow = combine(
@@ -193,6 +197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             streamingText = streaming,
             isLoading = status.isLoading,
             errorMessage = status.errorMessage,
+            appCheckDebugToken = status.appCheckDebugToken,
             isSelfUpgrading = status.isSelfUpgrading,
             lastUpgradePlan = status.lastUpgradePlan
         )
@@ -258,6 +263,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             aiStreamingText = ai.streamingText,
             isAiLoading = ai.isLoading,
             aiErrorMessage = ai.errorMessage,
+            aiAppCheckDebugToken = ai.appCheckDebugToken,
             isAiSelfUpgrading = ai.isSelfUpgrading,
             lastAiUpgradePlan = ai.lastUpgradePlan,
             github = github
@@ -611,10 +617,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectAiPersona(persona: AiExpertPersona) {
         _selectedAiPersona.value = persona
         _aiErrorMessage.value = null
+        _aiAppCheckDebugToken.value = null
     }
 
     fun dismissAiError() {
         _aiErrorMessage.value = null
+        _aiAppCheckDebugToken.value = null
     }
 
     fun clearAiChat() {
@@ -623,6 +631,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _aiStreamingText.value = ""
         _isAiLoading.value = false
         _aiErrorMessage.value = null
+        _aiAppCheckDebugToken.value = null
     }
 
     fun sendAiChatMessage(rawPrompt: String) {
@@ -641,6 +650,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _aiStreamingText.value = ""
         _isAiLoading.value = true
         _aiErrorMessage.value = null
+        _aiAppCheckDebugToken.value = null
 
         aiChatJob?.cancel()
         aiChatJob = viewModelScope.launch {
@@ -675,7 +685,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 Log.e("MainViewModel", "AI chat failed", e)
-                _aiErrorMessage.value = AiCoreEngine.formatUserError(e)
+                _aiErrorMessage.value = AiCoreEngine.formatUserError(e, getApplication())
+                _aiAppCheckDebugToken.value = if (AiCoreEngine.isAppCheckError(e)) {
+                    getDeviceAppCheckDebugSecret(getApplication())
+                } else {
+                    null
+                }
             } finally {
                 _aiStreamingText.value = ""
                 _isAiLoading.value = false
@@ -688,6 +703,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isAiSelfUpgrading.value = true
             _aiErrorMessage.value = null
+            _aiAppCheckDebugToken.value = null
             val current = uiState.value
             val diag = current.startupDiagnostic
             val recentLogs = current.logs.takeLast(12).joinToString("\n") { "[${it.tag}] ${it.message}" }
@@ -731,8 +747,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     showBanner("هسته VPN توسط هوش مصنوعی تحلیل و ارتقا یافت")
                 },
                 onFailure = { err ->
-                    val msg = AiCoreEngine.formatUserError(err)
+                    val msg = AiCoreEngine.formatUserError(err, getApplication())
                     _aiErrorMessage.value = msg
+                    _aiAppCheckDebugToken.value = if (AiCoreEngine.isAppCheckError(err)) {
+                        getDeviceAppCheckDebugSecret(getApplication())
+                    } else {
+                        null
+                    }
                 }
             )
         }
@@ -1167,6 +1188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private data class AiStatusSnapshot(
         val isLoading: Boolean,
         val errorMessage: String?,
+        val appCheckDebugToken: String?,
         val isSelfUpgrading: Boolean,
         val lastUpgradePlan: AiUpgradePlan?
     )
@@ -1177,6 +1199,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val streamingText: String,
         val isLoading: Boolean,
         val errorMessage: String?,
+        val appCheckDebugToken: String?,
         val isSelfUpgrading: Boolean,
         val lastUpgradePlan: AiUpgradePlan?
     )

@@ -457,14 +457,51 @@ class ExampleRobolectricTest {
     fun `ai core engine formats firebase and app check errors cleanly in persian`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         com.example.ai.AiCoreEngine.ensureFirebaseInitialized(context)
+        assertTrue(com.example.ai.isRecaptchaSiteKeyConfigured(context))
         val initMsg = com.example.ai.AiCoreEngine.formatUserError(
-            IllegalStateException("Default FirebaseApp is not initialized in this process com.aistudio.separeazad.rkmxqv.")
+            IllegalStateException("Default FirebaseApp is not initialized in this process com.aistudio.separeazad.rkmxqv."),
+            context
         )
         assertTrue(initMsg.contains("google-services.json"))
-        val appCheckMsg = com.example.ai.AiCoreEngine.formatUserError(
-            IllegalStateException("HTTP 403 App Check token is invalid")
-        )
+
+        val appCheckErr = IllegalStateException("HTTP 403 App Check token is invalid")
+        assertTrue(com.example.ai.AiCoreEngine.isAppCheckError(appCheckErr))
+        val appCheckMsg = com.example.ai.AiCoreEngine.formatUserError(appCheckErr, context)
         assertTrue(appCheckMsg.contains("debug.keystore.base64"))
+        assertTrue(appCheckMsg.contains("HTTP 403 App Check token is invalid"))
+
+        val geoErr = IllegalStateException("HTTP 403 User location is not supported for the API use.")
+        assertTrue(!com.example.ai.AiCoreEngine.isAppCheckError(geoErr))
+        val geoMsg = com.example.ai.AiCoreEngine.formatUserError(geoErr, context)
+        assertTrue(geoMsg.contains("موقعیت IP"))
+        assertTrue(geoMsg.contains("location is not supported"))
+    }
+
+    @Test
+    fun `ai hub screen shows app check debug token copy button when 403 debug token is present`() {
+        composeTestRule.setContent {
+            SeparNetTheme {
+                com.example.ui.screens.AiHubScreen(
+                    uiState = MainUiState(
+                        aiErrorMessage = "خطای تأیید App Check (403)",
+                        aiAppCheckDebugToken = "11111111-2222-3333-4444-555555555555"
+                    ),
+                    onRunSelfUpgrade = {},
+                    onAutoDiscoverConnect = {},
+                    onSelectPersona = {},
+                    onSendChatMessage = {},
+                    onClearChat = {},
+                    onDismissAiError = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("ai_error_banner")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag("ai_copy_debug_token_button")
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -497,6 +534,78 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         assertEquals(2, toggleCount)
     }
+
+    @Test
+    fun `traffic formatter and runtime state track upload and download speeds accurately`() {
+        assertEquals("0 KB/S", com.example.ui.components.FormatUtils.formatSpeed(0L))
+        assertEquals("512 B/S", com.example.ui.components.FormatUtils.formatSpeed(512L))
+        assertEquals("2.5 KB/S", com.example.ui.components.FormatUtils.formatSpeed(2560L))
+        assertEquals("120 KB/S", com.example.ui.components.FormatUtils.formatSpeed(120L * 1024L))
+        assertEquals("1.5 MB/S", com.example.ui.components.FormatUtils.formatSpeed(1536L * 1024L))
+
+        com.example.data.VpnRuntimeState.updateState(ConnectionState.Connected, com.example.model.VpnMode.PROXY_CHAIN)
+        com.example.data.VpnRuntimeState.setTrafficTotals(
+            rxTotal = 2_048_000L,
+            txTotal = 512_000L,
+            rxSpeed = 128_000L,
+            txSpeed = 32_000L
+        )
+        val activeTelemetry = com.example.data.VpnRuntimeState.telemetry.value
+        assertEquals(2_048_000L, activeTelemetry.rxBytes)
+        assertEquals(512_000L, activeTelemetry.txBytes)
+        assertEquals(128_000L, activeTelemetry.rxSpeedBps)
+        assertEquals(32_000L, activeTelemetry.txSpeedBps)
+
+        com.example.data.VpnRuntimeState.updateState(ConnectionState.Disconnected)
+        val resetTelemetry = com.example.data.VpnRuntimeState.telemetry.value
+        assertEquals(0L, resetTelemetry.rxBytes)
+        assertEquals(0L, resetTelemetry.txBytes)
+        assertEquals(0L, resetTelemetry.rxSpeedBps)
+        assertEquals(0L, resetTelemetry.txSpeedBps)
+    }
+
+    @Test
+    fun `singbox config includes clash_api and simplified connect screen opens mode sheet`() {
+        val json = org.json.JSONObject(
+            com.example.vpn.SingBoxConfigBuilder.buildConfig(
+                settings = com.example.data.UserSettings(vpnMode = com.example.model.VpnMode.DPI_FRAGMENT_DOH),
+                profile = null,
+                localSocksAntiDpiPort = 18080
+            )
+        )
+        assertTrue(json.has("experimental"))
+        assertTrue(json.getJSONObject("experimental").has("clash_api"))
+
+        var selectedMode: com.example.model.VpnMode? = null
+        composeTestRule.setContent {
+            SeparNetTheme {
+                ConnectScreen(
+                    uiState = MainUiState(
+                        telemetry = VpnTelemetry(
+                            state = ConnectionState.Connected,
+                            rxBytes = 1_500_000L,
+                            txBytes = 250_000L,
+                            rxSpeedBps = 2560L,
+                            txSpeedBps = 512L
+                        )
+                    ),
+                    onToggleConnection = {},
+                    onSelectMode = { selectedMode = it },
+                    onOpenProfiles = {},
+                    onOpenTools = {},
+                    onCheckExitIp = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("vpn_mode_selector_row")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("vpn_mode_DOH_ONLY")
+            .performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.model.VpnMode.DOH_ONLY, selectedMode)
+    }
 }
-
-

@@ -25,10 +25,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bolt
@@ -38,14 +36,15 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
@@ -53,10 +52,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,7 +84,6 @@ import com.example.ui.components.LtrText
 import com.example.ui.components.RadarConnectOrb
 import com.example.ui.theme.ConnectedGreen
 import com.example.ui.theme.CoralError
-import com.example.ui.theme.CyanSecondary
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueDeep
 import com.example.ui.theme.EmeraldContainer
@@ -100,6 +100,7 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectScreen(
     uiState: MainUiState,
@@ -112,8 +113,11 @@ fun ConnectScreen(
     modifier: Modifier = Modifier
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var showModeSheet by remember { mutableStateOf(false) }
     val connState = uiState.telemetry.state
     val isConnected = connState == ConnectionState.Connected
+    val isConnecting = connState == ConnectionState.Connecting
+    val isDisconnecting = connState == ConnectionState.Disconnecting
 
     LaunchedEffect(isConnected) {
         while (isConnected) {
@@ -123,14 +127,13 @@ fun ConnectScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Subtle atmospheric backdrop matching the midnight-cobalt glass design
         Image(
             painter = painterResource(id = R.drawable.img_cyber_persian_bg_1795145565659),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .fillMaxSize()
-                .alpha(0.08f)
+                .alpha(0.07f)
         )
 
         Box(
@@ -156,7 +159,7 @@ fun ConnectScreen(
                 .align(Alignment.TopCenter),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Header: Shield Status Badge + Quick WARP Pill (matching mockup)
+            // 1. Clean Top Header: Status Badge + Quick WARP Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -177,7 +180,7 @@ fun ConnectScreen(
                     }
                     val statusHeadline = when (connState) {
                         ConnectionState.Connected -> "متصل و ایمن"
-                        ConnectionState.Connecting -> "در حال بررسی…"
+                        ConnectionState.Connecting -> "در حال اتصال…"
                         ConnectionState.Disconnecting -> "در حال قطع…"
                         is ConnectionState.Error -> "اتصال ناموفق"
                         ConnectionState.Disconnected -> "متصل نیست"
@@ -185,7 +188,7 @@ fun ConnectScreen(
 
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(shieldBg)
                             .border(1.dp, shieldTint.copy(alpha = 0.4f), CircleShape),
@@ -195,25 +198,34 @@ fun ConnectScreen(
                             imageVector = if (isConnected) Icons.Rounded.VerifiedUser else Icons.Outlined.Shield,
                             contentDescription = "وضعیت سپر نت",
                             tint = shieldTint,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(21.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "وضعیت VPN",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary
-                        )
-                        Text(
                             text = statusHeadline,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = if (isConnected) ConnectedGreen else TextPrimary
                         )
+                        if (isConnected) {
+                            LtrText(
+                                text = FormatUtils.formatDuration(uiState.telemetry.connectedSinceMs, nowMs),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = JetBrainsMonoFontFamily
+                                ),
+                                color = TextSecondary
+                            )
+                        } else {
+                            Text(
+                                text = "سپر نت",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
                     }
                 }
 
-                // Glowing "WARP سریع" capsule pill button matching the top-right Pro pill in mockup
                 Surface(
                     onClick = onQuickWarpConnect,
                     enabled = !uiState.isGeneratingWarp,
@@ -247,7 +259,7 @@ fun ConnectScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
+                                .size(28.dp)
                                 .clip(CircleShape)
                                 .background(
                                     Brush.radialGradient(
@@ -258,7 +270,7 @@ fun ConnectScreen(
                         ) {
                             if (uiState.isGeneratingWarp) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(15.dp),
+                                    modifier = Modifier.size(14.dp),
                                     strokeWidth = 2.dp,
                                     color = Color.White
                                 )
@@ -267,7 +279,7 @@ fun ConnectScreen(
                                     imageVector = Icons.Rounded.Bolt,
                                     contentDescription = "ساخت و اتصال فوری WARP",
                                     tint = Color.White,
-                                    modifier = Modifier.size(17.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
@@ -275,15 +287,16 @@ fun ConnectScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Dual Upload & Download Speed Cards (matching top stat pills in mockup)
+            // 2. Live Upload & Download Speed Cards
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 SpeedStatPillCard(
                     icon = Icons.Rounded.ArrowUpward,
+                    accentColor = SkyCyanGlow,
                     label = "آپلود",
                     speedText = FormatUtils.formatSpeed(uiState.telemetry.txSpeedBps),
                     totalText = FormatUtils.formatBytes(uiState.telemetry.txBytes),
@@ -291,6 +304,7 @@ fun ConnectScreen(
                 )
                 SpeedStatPillCard(
                     icon = Icons.Rounded.ArrowDownward,
+                    accentColor = ConnectedGreen,
                     label = "دانلود",
                     speedText = FormatUtils.formatSpeed(uiState.telemetry.rxSpeedBps),
                     totalText = FormatUtils.formatBytes(uiState.telemetry.rxBytes),
@@ -298,39 +312,42 @@ fun ConnectScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // Centerpiece Harmonic Spirograph Mandala Orb
+            // 3. Hero Connect Orb + Compact Material 3 Switch Bar
             RadarConnectOrb(
                 state = connState,
-                onClick = onToggleConnection
+                onClick = onToggleConnection,
+                orbSize = 224.dp
             )
 
-            // Prominent Material 3 Connect / Disconnect Switch & Action Bar
-            val isConnecting = connState == ConnectionState.Connecting
-            val isDisconnecting = connState == ConnectionState.Disconnecting
             val switchChecked = isConnected || isConnecting
-            GlassCard(
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 12.dp),
-                cornerRadius = 20.dp,
-                containerColor = ObsidianSurface.copy(alpha = 0.94f),
-                borderColor = when {
-                    isConnected -> ConnectedGreen.copy(alpha = 0.55f)
-                    isConnecting -> SaffronAmber.copy(alpha = 0.55f)
-                    else -> ElectricBlue.copy(alpha = 0.45f)
-                }
+                shape = RoundedCornerShape(20.dp),
+                color = ObsidianSurface.copy(alpha = 0.94f),
+                border = BorderStroke(
+                    1.dp,
+                    when {
+                        isConnected -> ConnectedGreen.copy(alpha = 0.55f)
+                        isConnecting -> SaffronAmber.copy(alpha = 0.55f)
+                        else -> ElectricBlue.copy(alpha = 0.45f)
+                    }
+                )
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
                         onClick = onToggleConnection,
                         enabled = !isDisconnecting,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = when {
                                 isConnected -> Color(0xFFB4233C)
@@ -341,7 +358,7 @@ fun ConnectScreen(
                         ),
                         modifier = Modifier
                             .weight(1f)
-                            .height(52.dp)
+                            .height(48.dp)
                             .minimumInteractiveComponentSize()
                             .testTag("vpn_switch_button")
                     ) {
@@ -365,7 +382,7 @@ fun ConnectScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isConnected) "قطع اتصال (Disconnect)" else "اتصال امن (Connect)",
+                                text = if (isConnected) "قطع اتصال" else "اتصال امن",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -400,7 +417,7 @@ fun ConnectScreen(
                 }
             }
 
-            // Connection / Instagram Verification Error Banner
+            // Error Banner (only visible when an error happens)
             AnimatedVisibility(visible = connState is ConnectionState.Error) {
                 if (connState is ConnectionState.Error) {
                     GlassCard(
@@ -418,19 +435,19 @@ fun ConnectScreen(
                 }
             }
 
-            // Bottom Server & Exit IP Glass Card (matching mockup's bottom location + ping + IP card)
+            // 4. Single Unified Connection Card (Server + Mode Selector + Ping / DNS / Exit IP)
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 22.dp,
                 containerColor = ObsidianSurface.copy(alpha = 0.92f)
             ) {
-                // Elevated Inner Server Selector Pill
+                // Active Server Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF15234B))
-                        .border(1.dp, ObsidianCardBorder, RoundedCornerShape(16.dp))
+                        .border(1.dp, ObsidianCardBorder, RoundedCornerShape(14.dp))
                         .clickable(onClick = onOpenProfiles)
                         .minimumInteractiveComponentSize()
                         .padding(horizontal = 12.dp, vertical = 10.dp)
@@ -439,7 +456,7 @@ fun ConnectScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(
@@ -456,25 +473,31 @@ fun ConnectScreen(
                             imageVector = Icons.Rounded.Public,
                             contentDescription = "انتخاب سرور",
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = uiState.selectedProfile?.name ?: "انتخاب سرور خارجی",
+                            text = uiState.selectedProfile?.name
+                                ?: uiState.telemetry.activeServerLabel
+                                ?: "انتخاب سرور (یا حالت خودکار)",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = TextPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        val missingServerHint = uiState.settings.vpnMode == VpnMode.PROXY_CHAIN && uiState.selectedProfile == null
                         Text(
-                            text = uiState.selectedProfile?.let { "${it.protocol.name} • ${it.host}" }
-                                ?: uiState.settings.vpnMode.titleFa,
+                            text = when {
+                                uiState.selectedProfile != null -> "${uiState.selectedProfile.protocol.displayName} • ${uiState.selectedProfile.host}"
+                                missingServerHint -> "برای حالت دستی، یک سرور اضافه کنید یا WARP سریع را بزنید"
+                                else -> "کشف و اتصال خودکار از بهترین سرورها"
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
+                            color = if (missingServerHint) SaffronAmber else TextSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -484,32 +507,72 @@ fun ConnectScreen(
                         imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
                         contentDescription = "لیست سرورها",
                         tint = TextSecondary,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // 2-Column Footer: Speed/Ping & Exit IP Address
+                // Compact Mode Row (opens ModalBottomSheet instead of taking 6 cards on home screen)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ObsidianSurfaceElevated.copy(alpha = 0.5f))
+                        .clickable { showModeSheet = true }
+                        .minimumInteractiveComponentSize()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .testTag("vpn_mode_selector_row"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Tune,
+                        contentDescription = "تغییر روش اتصال",
+                        tint = SkyCyanGlow,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = uiState.settings.vpnMode.titleFa,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "تغییر",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = SkyCyanGlow
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = ObsidianCardBorder.copy(alpha = 0.7f))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Compact 3-Metric Footer: Ping | DNS | Exit IP
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Ping
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "پینگ و سرعت",
-                            style = MaterialTheme.typography.labelMedium,
+                            text = "پینگ",
+                            style = MaterialTheme.typography.labelSmall,
                             color = TextSecondary
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         val latencyMs = uiState.selectedProfile?.latencyMs
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             SignalBarsIndicator(latencyMs = latencyMs, isConnected = isConnected)
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             LtrText(
                                 text = latencyMs?.takeIf { it > 0 }?.let { "$it MS" } ?: "-- MS",
-                                style = MaterialTheme.typography.labelLarge.copy(
+                                style = MaterialTheme.typography.labelMedium.copy(
                                     fontFamily = JetBrainsMonoFontFamily,
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -518,29 +581,68 @@ fun ConnectScreen(
                         }
                     }
 
+                    // DNS Shortcut
                     Column(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onOpenTools)
+                            .minimumInteractiveComponentSize()
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("quick_dns_chip"),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Outlined.Dns,
+                                contentDescription = "تنظیمات DNS",
+                                tint = SkyCyanGlow,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "DNS",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = uiState.settings.resolveActiveDnsLabel()
+                                .substringBefore(" (")
+                                .trim(),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Exit IP Check
+                    Column(
+                        modifier = Modifier
+                            .weight(1.1f)
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable(
                                 enabled = !uiState.isCheckingExitIp,
                                 onClick = onCheckExitIp
                             )
                             .minimumInteractiveComponentSize()
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
                             .testTag("check_exit_ip_button"),
                         horizontalAlignment = Alignment.End
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "آدرس IP خروج",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "IP خروج",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             if (uiState.isCheckingExitIp) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(12.dp),
-                                    strokeWidth = 1.8.dp,
+                                    modifier = Modifier.size(11.dp),
+                                    strokeWidth = 1.6.dp,
                                     color = SkyCyanGlow
                                 )
                             } else {
@@ -548,15 +650,15 @@ fun ConnectScreen(
                                     imageVector = Icons.Rounded.Refresh,
                                     contentDescription = "بررسی IP خروج",
                                     tint = SkyCyanGlow,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         val ipInfo = uiState.exitIpInfo
                         LtrText(
                             text = if (ipInfo != null) "${ipInfo.ip} (${ipInfo.countryCode})" else "بررسی IP",
-                            style = MaterialTheme.typography.labelLarge.copy(
+                            style = MaterialTheme.typography.labelMedium.copy(
                                 fontFamily = JetBrainsMonoFontFamily,
                                 fontWeight = FontWeight.Bold
                             ),
@@ -570,171 +672,30 @@ fun ConnectScreen(
                 }
             }
 
-            val hasActiveForeignServer = uiState.settings.vpnMode == VpnMode.AI_AUTO_DISCOVERY ||
-                (uiState.settings.vpnMode == VpnMode.PROXY_CHAIN && uiState.selectedProfile != null) ||
-                (uiState.settings.vpnMode == VpnMode.AUTO_BEST_SERVER && uiState.profiles.isNotEmpty()) ||
-                (uiState.settings.vpnMode == VpnMode.DOUBLE_WARP_CHAIN && uiState.profiles.any { it.protocol == ProxyProtocol.WIREGUARD })
-
-            if (!hasActiveForeignServer) {
-                Spacer(modifier = Modifier.height(12.dp))
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    cornerRadius = 18.dp,
-                    borderColor = SaffronAmber.copy(alpha = 0.45f)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Outlined.Info,
-                            contentDescription = null,
-                            tint = SaffronAmber,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "سرور خارجی انتخاب نشده است — برای دسترسی آزاد و تغییر IP، روی «WARP سریع» بزنید یا حالت «هوش مصنوعی خودارتقاگر» را انتخاب کنید.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = SaffronAmber
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedButton(
-                        onClick = onOpenProfiles,
-                        border = BorderStroke(1.dp, SaffronAmber.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .minimumInteractiveComponentSize()
-                            .testTag("go_to_servers_cta")
-                    ) {
-                        Text("افزودن یا انتخاب سرور خارجی (VLESS / HY2 / WG / SSH)", color = SaffronAmber)
-                    }
-                }
-            }
-
             Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
 
-            // Compact DNS + Session Diagnostics Strip
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 18.dp
+    if (showModeSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showModeSheet = false },
+            sheetState = sheetState,
+            containerColor = ObsidianSurface,
+            contentColor = TextPrimary
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 24.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable(onClick = onOpenTools)
-                            .minimumInteractiveComponentSize()
-                            .padding(vertical = 4.dp)
-                            .testTag("quick_dns_chip")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Dns,
-                            contentDescription = "تنظیمات DNS",
-                            tint = CyanSecondary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "DNS رمزنگاری‌شده",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = TextSecondary
-                            )
-                            Text(
-                                text = uiState.settings.resolveActiveDnsLabel(),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(34.dp)
-                            .background(ObsidianCardBorder)
-                    )
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Timer,
-                            contentDescription = "مدت اتصال",
-                            tint = ElectricBlue,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "مدت و استثناها",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = TextSecondary
-                            )
-                            LtrText(
-                                text = "${FormatUtils.formatDuration(uiState.telemetry.connectedSinceMs, nowMs)} • ${uiState.settings.bypassedPackages.size} اپ",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = JetBrainsMonoFontFamily,
-                                    fontWeight = FontWeight.SemiBold
-                                ),
-                                color = TextPrimary
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Security,
-                        contentDescription = null,
-                        tint = SaffronAmber,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    LtrText(
-                        text = "${uiState.telemetry.dnsQueriesResolved} DoH  •  ${uiState.telemetry.fragmentedConnections} TLS Fragment",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextMuted
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Connection Mode Picker
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Public,
-                        contentDescription = null,
-                        tint = SkyCyanGlow,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "روش اتصال و عبور از فیلترینگ",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary
-                    )
-                }
+                Text(
+                    text = "انتخاب روش اتصال",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = TextPrimary,
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
 
                 VpnMode.entries.forEach { mode ->
                     val selected = uiState.settings.vpnMode == mode
@@ -749,14 +710,17 @@ fun ConnectScreen(
                             .clip(RoundedCornerShape(14.dp))
                             .background(
                                 if (selected) EmeraldContainer.copy(alpha = 0.72f)
-                                else ObsidianSurfaceElevated.copy(alpha = 0.45f)
+                                else ObsidianSurfaceElevated.copy(alpha = 0.55f)
                             )
                             .border(
                                 1.dp,
                                 if (selected) ElectricBlue.copy(alpha = 0.55f) else Color.Transparent,
                                 RoundedCornerShape(14.dp)
                             )
-                            .clickable { onSelectMode(mode) }
+                            .clickable {
+                                onSelectMode(mode)
+                                showModeSheet = false
+                            }
                             .minimumInteractiveComponentSize()
                             .padding(horizontal = 12.dp, vertical = 10.dp)
                             .testTag("vpn_mode_${mode.name}"),
@@ -764,7 +728,10 @@ fun ConnectScreen(
                     ) {
                         RadioButton(
                             selected = selected,
-                            onClick = { onSelectMode(mode) },
+                            onClick = {
+                                onSelectMode(mode)
+                                showModeSheet = false
+                            },
                             colors = RadioButtonDefaults.colors(
                                 selectedColor = SkyCyanGlow,
                                 unselectedColor = TextMuted
@@ -779,7 +746,7 @@ fun ConnectScreen(
                             )
                             Text(
                                 text = if (proxyWarning) {
-                                    "ابتدا حداقل یک سرور در تب «سرورها» اضافه کنید"
+                                    "نیازمند حداقل یک سرور در تب «سرورها»"
                                 } else {
                                     mode.subtitleFa
                                 },
@@ -798,8 +765,6 @@ fun ConnectScreen(
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -807,6 +772,7 @@ fun ConnectScreen(
 @Composable
 private fun SpeedStatPillCard(
     icon: ImageVector,
+    accentColor: Color,
     label: String,
     speedText: String,
     totalText: String,
@@ -823,16 +789,16 @@ private fun SpeedStatPillCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF172756))
-                    .border(1.dp, ObsidianCardBorder, CircleShape),
+                    .border(1.dp, accentColor.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
-                    tint = Color.White,
+                    tint = accentColor,
                     modifier = Modifier.size(18.dp)
                 )
             }

@@ -92,8 +92,11 @@ object FormatUtils {
     }
 
     fun formatSpeed(bps: Long): String {
-        if (bps < 1024L) return "0 KB/S"
-        val kb = bps / 1024.0
+        val safe = bps.coerceAtLeast(0L)
+        if (safe == 0L) return "0 KB/S"
+        if (safe < 1024L) return "$safe B/S"
+        val kb = safe / 1024.0
+        if (kb < 10.0) return String.format(Locale.US, "%.1f KB/S", kb)
         if (kb < 1024.0) return String.format(Locale.US, "%.0f KB/S", kb)
         val mb = kb / 1024.0
         return String.format(Locale.US, "%.1f MB/S", mb)
@@ -203,7 +206,8 @@ fun StatusPill(
 fun RadarConnectOrb(
     state: ConnectionState,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    orbSize: Dp = 276.dp
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -258,7 +262,7 @@ fun RadarConnectOrb(
     )
 
     Box(
-        modifier = modifier.size(276.dp),
+        modifier = modifier.size(orbSize),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -345,7 +349,7 @@ fun RadarConnectOrb(
         Box(
             modifier = Modifier
                 .scale(pressScale)
-                .size(134.dp)
+                .size(orbSize * 0.485f)
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(

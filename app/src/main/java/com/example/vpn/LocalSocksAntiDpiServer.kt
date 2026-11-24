@@ -17,6 +17,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.atomic.AtomicLong
 
 class LocalSocksAntiDpiServer(
     private val vpnService: VpnService,
@@ -28,6 +29,10 @@ class LocalSocksAntiDpiServer(
     private var serverSocket: ServerSocket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var acceptJob: Job? = null
+    private val rxBytesCounter = AtomicLong(0L)
+    private val txBytesCounter = AtomicLong(0L)
+
+    fun getTrafficSnapshot(): Pair<Long, Long> = rxBytesCounter.get() to txBytesCounter.get()
 
     fun start(): Int {
         val ss = ServerSocket(0, 128, InetAddress.getByName("127.0.0.1"))
@@ -161,6 +166,7 @@ class LocalSocksAntiDpiServer(
                             val chunk = minOf(fragmentSizeBytes, read - offset)
                             serverOut.write(buf, offset, chunk)
                             serverOut.flush()
+                            txBytesCounter.addAndGet(chunk.toLong())
                             offset += chunk
                             if (offset < read && fragmentDelayMs > 0) {
                                 delay(fragmentDelayMs.toLong())
@@ -172,6 +178,7 @@ class LocalSocksAntiDpiServer(
                         isFirstWrite = false
                         serverOut.write(buf, 0, read)
                         serverOut.flush()
+                        txBytesCounter.addAndGet(read.toLong())
                     }
                 }
             } catch (_: Exception) {
@@ -188,6 +195,7 @@ class LocalSocksAntiDpiServer(
                     if (read <= 0) break
                     clientOut.write(buf, 0, read)
                     clientOut.flush()
+                    rxBytesCounter.addAndGet(read.toLong())
                 }
             } catch (_: Exception) {
             }

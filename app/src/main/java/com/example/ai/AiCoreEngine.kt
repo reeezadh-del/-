@@ -2,6 +2,7 @@ package com.example.ai
 
 import android.content.Context
 import android.util.Log
+import com.example.BuildConfig
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.ai.ai
@@ -145,17 +146,88 @@ object AiCoreEngine {
         }
     }
 
-    fun formatUserError(error: Throwable): String {
-        val raw = error.message.orEmpty()
+    internal fun collectErrorMessages(error: Throwable): String {
+        val messages = mutableListOf<String>()
+        var current: Throwable? = error
+        var depth = 0
+        while (current != null && depth < 6) {
+            current.message?.trim()?.takeIf { it.isNotEmpty() }?.let { msg ->
+                if (messages.none { it == msg }) {
+                    messages.add(msg)
+                }
+            }
+            current = current.cause
+            depth++
+        }
+        return messages.joinToString(" | ")
+    }
+
+    fun isAppCheckError(error: Throwable): Boolean {
+        val raw = collectErrorMessages(error)
+        if (raw.contains("location is not supported", ignoreCase = true) ||
+            raw.contains("country", ignoreCase = true)
+        ) {
+            return false
+        }
+        return raw.contains("App Check", ignoreCase = true) ||
+            raw.contains("appcheck", ignoreCase = true) ||
+            raw.contains("attestation", ignoreCase = true) ||
+            raw.contains("403", ignoreCase = true) ||
+            raw.contains("۴۰۳", ignoreCase = true)
+    }
+
+    fun formatUserError(error: Throwable, context: Context? = null): String {
+        val raw = collectErrorMessages(error)
+        // Avoid double-wrapping if the exception already holds a formatted Persian message
+        val rootCauseOnly = run {
+            var c: Throwable = error
+            var depth = 0
+            while (c.cause != null && depth < 6) {
+                c = c.cause!!
+                depth++
+            }
+            c.message?.trim().orEmpty()
+        }
+        val technicalDetail = rootCauseOnly.ifBlank { raw }.take(240)
+
         return when {
             raw.contains("Default FirebaseApp is not initialized", ignoreCase = true) ->
                 "مقداردهی Firebase در این نسخه کامل نیست (احتمالاً app/google-services.json هنگام بیلد گیت‌هاب همگام نبوده است)."
-            raw.contains("403", ignoreCase = true) || raw.contains("App Check", ignoreCase = true) ||
-                raw.contains("attestation", ignoreCase = true) ->
-                "خطای تأیید App Check / امضای برنامه (۴۰۳). مطمئن شوید نسخه با debug.keystore.base64 اصلی پروژه در گیت‌هاب بیلد شده باشد."
-            raw.contains("network", ignoreCase = true) || raw.contains("Unable to resolve host", ignoreCase = true) ||
+
+            raw.contains("location is not supported", ignoreCase = true) ||
+                raw.contains("User location", ignoreCase = true) ||
+                raw.contains("country", ignoreCase = true) ->
+                "موقعیت IP فعلی برای سرویس Gemini مجاز نیست. سرور VPN را به کشور دیگری (مثل آلمان، هلند یا آمریکا) تغییر دهید.\nجزئیات فنی: $technicalDetail"
+
+            raw.contains("403", ignoreCase = true) ||
+                raw.contains("App Check", ignoreCase = true) ||
+                raw.contains("appcheck", ignoreCase = true) ||
+                raw.contains("attestation", ignoreCase = true) ||
+                raw.contains("PERMISSION_DENIED", ignoreCase = true) -> {
+                if (!BuildConfig.DEBUG) {
+                    val hasSiteKey = context?.let { isRecaptchaSiteKeyConfigured(it) } ?: true
+                    if (!hasSiteKey) {
+                        "کلید reCAPTCHA Enterprise (recaptcha_site_key) در این نسخه Release تنظیم نشده است. Secret با نام RECAPTCHA_SITE_KEY را در GitHub یا strings.xml وارد و دوباره بیلد بگیرید.\nجزئیات فنی: $technicalDetail"
+                    } else {
+                        "خطای تأیید App Check / reCAPTCHA Enterprise در نسخه Release (۴۰۳). مطمئن شوید Site Key مربوط به پکیج com.aistudio.separeazad.rkmxqv در پروژه gen-lang-client-0100369671 است و SHA-1/SHA-256 کلید Release در Firebase ثبت شده است.\nجزئیات فنی: $technicalDetail"
+                    }
+                } else {
+                    "خطای تأیید App Check / امضای برنامه (۴۰۳). در نسخه‌های Debug ساخته‌شده در گیت‌هاب، توکن دیباگ این گوشی باید یک‌بار در Firebase Console → App Check ثبت شود و بیلد با debug.keystore.base64 اصلی باشد (یا از نسخه Release با reCAPTCHA استفاده کنید).\nجزئیات فنی: $technicalDetail"
+                }
+            }
+
+            raw.contains("429", ignoreCase = true) ||
+                raw.contains("quota", ignoreCase = true) ||
+                raw.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ->
+                "سهمیه درخواست لحظه‌ای مدل تکمیل شده است. چند ثانیه بعد دوباره امتحان کنید یا مدل Flash Lite را انتخاب کنید.\nجزئیات فنی: $technicalDetail"
+
+            raw.contains("network", ignoreCase = true) ||
+                raw.contains("Unable to resolve host", ignoreCase = true) ||
+                raw.contains("UnknownHostException", ignoreCase = true) ||
+                raw.contains("ConnectException", ignoreCase = true) ||
                 raw.contains("timeout", ignoreCase = true) ->
-                "ارتباط با سرور هوش مصنوعی برقرار نشد. ابتدا VPN را متصل کرده یا اینترنت را بررسی کنید."
+                "ارتباط با سرور هوش مصنوعی برقرار نشد. ابتدا VPN را متصل کرده یا اینترنت را بررسی کنید.\nجزئیات فنی: $technicalDetail"
+
             raw.isNotBlank() -> raw
             else -> "خطای ناشناخته در ارتباط با هسته هوش مصنوعی"
         }
@@ -219,7 +291,7 @@ object AiCoreEngine {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "AI self-upgrade analysis failed", e)
-            Result.failure(IllegalStateException(formatUserError(e), e))
+            Result.failure(IllegalStateException(formatUserError(e, context), e))
         }
     }
 }

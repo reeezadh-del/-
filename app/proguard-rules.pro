@@ -38,4 +38,7 @@
 
 # Firebase AI Logic & App Check release safety
 -keep class com.google.firebase.** { *; }
+-keep class com.google.android.recaptcha.** { *; }
+-dontwarn com.google.android.recaptcha.**
 -keep class com.example.ai.** { *; }
+

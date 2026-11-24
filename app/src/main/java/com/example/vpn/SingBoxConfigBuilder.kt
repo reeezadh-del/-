@@ -206,6 +206,11 @@ object SingBoxConfigBuilder {
             put("auto_detect_interface", true)
         })
 
+        // 6. Experimental Clash API tracker (enables StatusMessage uplink/downlink traffic telemetry in libbox)
+        root.put("experimental", JSONObject().apply {
+            put("clash_api", JSONObject())
+        })
+
         return root.toString()
     }
 

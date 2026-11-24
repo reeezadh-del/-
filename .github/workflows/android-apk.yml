@@ -79,11 +79,81 @@ jobs:
             "$APKSIGNER" verify --print-certs "$APK_FILE"
           fi
 
-      - name: Upload APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v7
         with:
           name: SeparNet-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Configure reCAPTCHA Enterprise Site Key for Release
+        env:
+          RECAPTCHA_SITE_KEY: ${{ secrets.RECAPTCHA_SITE_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, html
+          path = "app/src/main/res/values/firebase_applet_config.xml"
+          if not os.path.exists(path):
+              raise SystemExit("::error::app/src/main/res/values/firebase_applet_config.xml is missing!")
+          with open(path, "r", encoding="utf-8") as f:
+              text = f.read()
+          secret_key = os.environ.get("RECAPTCHA_SITE_KEY", "").strip()
+          if secret_key:
+              escaped = html.escape(secret_key, quote=False)
+              new_line = f'<string name="recaptcha_site_key" translatable="false">{escaped}</string>'
+              if re.search(r'<string\s+name="recaptcha_site_key"[^>]*>.*?</string>', text):
+                  text = re.sub(r'<string\s+name="recaptcha_site_key"[^>]*>.*?</string>', new_line, text)
+              else:
+                  text = text.replace("</resources>", f"    {new_line}\n</resources>")
+              with open(path, "w", encoding="utf-8") as f:
+                  f.write(text)
+              print("Updated recaptcha_site_key in firebase_applet_config.xml from RECAPTCHA_SITE_KEY secret.")
+          else:
+              m = re.search(r'<string\s+name="recaptcha_site_key"[^>]*>(.*?)</string>', text)
+              if not m or not m.group(1).strip():
+                  raise SystemExit("::error::recaptcha_site_key in firebase_applet_config.xml is empty and RECAPTCHA_SITE_KEY secret is not set.")
+              print("Verified recaptcha_site_key in app/src/main/res/values/firebase_applet_config.xml.")
+          PY
+
+      - name: Build & Verify Signed Release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export KEYSTORE_PATH="/tmp/separnet-release-upload.jks"
+          rm -f "$KEYSTORE_PATH"
+          if [ -n "${KEYSTORE_BASE64}" ]; then
+            if [ -z "${STORE_PASSWORD}" ] || [ -z "${KEY_PASSWORD}" ]; then
+              echo "::error::STORE_PASSWORD and KEY_PASSWORD secrets are required when KEYSTORE_BASE64 is set."
+              exit 1
+            fi
+            printf '%s' "$KEYSTORE_BASE64" | tr -d ' \n\r' | base64 -d > "$KEYSTORE_PATH"
+          else
+            echo "::notice::KEYSTORE_BASE64 secret not set; signing sideload Release APK with the project's registered Firebase certificate mapped to alias 'upload'."
+            cp debug.keystore "$KEYSTORE_PATH"
+            keytool -changealias -alias androiddebugkey -destalias upload -keystore "$KEYSTORE_PATH" -storepass android -keypass android
+            export STORE_PASSWORD="android"
+            export KEY_PASSWORD="android"
+          fi
+          keytool -list -v -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias upload
+          gradle :app:assembleRelease -PtargetAbis=arm64-v8a --no-daemon --stacktrace
+          rm -f "$KEYSTORE_PATH"
+          APK_FILE="$(ls app/build/outputs/apk/release/*.apk | head -n1)"
+          ls -lh "$APK_FILE"
+          APKSIGNER="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner -type f | sort -V | tail -n1)"
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$APK_FILE"
+          fi
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: SeparNet-release-apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
 

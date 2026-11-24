@@ -70,25 +70,28 @@ object VpnRuntimeState {
     fun addBytes(rxDelta: Long, txDelta: Long) {
         _telemetry.update {
             it.copy(
-                rxBytes = it.rxBytes + rxDelta,
-                txBytes = it.txBytes + txDelta
+                rxBytes = (it.rxBytes + rxDelta.coerceAtLeast(0L)),
+                txBytes = (it.txBytes + txDelta.coerceAtLeast(0L))
             )
         }
     }
 
     fun updateSpeeds(rxBps: Long, txBps: Long) {
         _telemetry.update {
-            it.copy(rxSpeedBps = rxBps, txSpeedBps = txBps)
+            it.copy(
+                rxSpeedBps = rxBps.coerceAtLeast(0L),
+                txSpeedBps = txBps.coerceAtLeast(0L)
+            )
         }
     }
 
     fun setTrafficTotals(rxTotal: Long, txTotal: Long, rxSpeed: Long, txSpeed: Long) {
         _telemetry.update {
             it.copy(
-                rxBytes = rxTotal,
-                txBytes = txTotal,
-                rxSpeedBps = rxSpeed,
-                txSpeedBps = txSpeed
+                rxBytes = rxTotal.coerceAtLeast(0L),
+                txBytes = txTotal.coerceAtLeast(0L),
+                rxSpeedBps = rxSpeed.coerceAtLeast(0L),
+                txSpeedBps = txSpeed.coerceAtLeast(0L)
             )
         }
     }

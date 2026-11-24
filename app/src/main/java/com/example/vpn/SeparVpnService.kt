@@ -6,9 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.example.MainActivity
@@ -36,11 +38,14 @@ import io.nekohasekai.libbox.SystemProxyStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -61,7 +66,12 @@ class SeparVpnService : VpnService() {
     private var localSocksAntiDpiServer: LocalSocksAntiDpiServer? = null
     private var commandServer: CommandServer? = null
     private var commandClient: CommandClient? = null
+    private var commandClientJob: Job? = null
+    private var trafficMonitorJob: Job? = null
     private var latestBypassedPackages: Set<String> = emptySet()
+
+    @Volatile
+    private var lastLibboxStatusMs: Long = 0L
 
     @Volatile
     private var stopRequested = false
@@ -178,7 +188,9 @@ class SeparVpnService : VpnService() {
                 effectiveSettings = effectiveSettings,
                 antiDpiSocksPort = outcome.antiDpiSocksPort,
                 serverLabel = serverLabel,
-                exitInfo = exitInfo
+                exitInfo = exitInfo,
+                baseUidRx = outcome.baseUidRx,
+                baseUidTx = outcome.baseUidTx
             )
         } catch (e: Exception) {
             VpnRuntimeState.appendLog("VPN", "خطا: ${e.message ?: "متصل نشد"}", isError = true)
@@ -191,7 +203,9 @@ class SeparVpnService : VpnService() {
 
     private data class CandidateTunnelOutcome(
         val exitIpInfo: com.example.data.NetworkProbe.ExitIpInfo?,
-        val antiDpiSocksPort: Int
+        val antiDpiSocksPort: Int,
+        val baseUidRx: Long,
+        val baseUidTx: Long
     )
 
     private suspend fun tryCandidateTunnel(
@@ -237,6 +251,10 @@ class SeparVpnService : VpnService() {
                 onTunOpened = { pfd -> tunInterface = pfd }
             )
 
+            val uid = Process.myUid()
+            val baseUidRx = TrafficStats.getUidRxBytes(uid)
+            val baseUidTx = TrafficStats.getUidTxBytes(uid)
+
             val server = Libbox.newCommandServer(serverHandler, platformInterface)
             server.start()
             commandServer = server
@@ -248,7 +266,7 @@ class SeparVpnService : VpnService() {
 
             connectCommandClient()
 
-            kotlinx.coroutines.delay(400)
+            delay(400)
             if (stopRequested) {
                 cleanupTunnelResources()
                 return Result.failure(kotlinx.coroutines.CancellationException("اتصال توسط کاربر لغو شد"))
@@ -262,7 +280,9 @@ class SeparVpnService : VpnService() {
                 Result.success(
                     CandidateTunnelOutcome(
                         exitIpInfo = probeResult.getOrNull(),
-                        antiDpiSocksPort = antiDpiSocksPort
+                        antiDpiSocksPort = antiDpiSocksPort,
+                        baseUidRx = baseUidRx,
+                        baseUidTx = baseUidTx
                     )
                 )
             } else {
@@ -479,7 +499,9 @@ class SeparVpnService : VpnService() {
             effectiveSettings = effectiveSettings,
             antiDpiSocksPort = outcome.antiDpiSocksPort,
             serverLabel = serverLabel,
-            exitInfo = exitInfo
+            exitInfo = exitInfo,
+            baseUidRx = outcome.baseUidRx,
+            baseUidTx = outcome.baseUidTx
         )
     }
 
@@ -488,7 +510,9 @@ class SeparVpnService : VpnService() {
         effectiveSettings: com.example.data.UserSettings,
         antiDpiSocksPort: Int,
         serverLabel: String?,
-        exitInfo: com.example.data.NetworkProbe.ExitIpInfo?
+        exitInfo: com.example.data.NetworkProbe.ExitIpInfo?,
+        baseUidRx: Long,
+        baseUidTx: Long
     ) {
         VpnRuntimeState.updateSessionInfo(
             activeDnsLabel = effectiveSettings.resolveActiveDnsLabel(),
@@ -496,6 +520,7 @@ class SeparVpnService : VpnService() {
             activeServerLabel = serverLabel
         )
         VpnRuntimeState.updateState(ConnectionState.Connected, effectiveMode)
+        startTrafficMonitor(localSocksAntiDpiServer, baseUidRx, baseUidTx)
         val countrySuffix = exitInfo?.countryCode?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
         promoteToForeground(
             if (serverLabel != null) "سپر نت متصل$countrySuffix: $serverLabel"
@@ -529,6 +554,8 @@ class SeparVpnService : VpnService() {
     }
 
     private fun connectCommandClient() {
+        commandClientJob?.cancel()
+        runCatching { commandClient?.disconnect() }
         val options = CommandClientOptions().apply {
             addCommand(Libbox.CommandStatus)
             addCommand(Libbox.CommandLog)
@@ -536,9 +563,82 @@ class SeparVpnService : VpnService() {
         }
         val client = Libbox.newCommandClient(clientHandler, options)
         commandClient = client
-        serviceScope.launch {
-            runCatching { client.connect() }
+        commandClientJob = serviceScope.launch {
+            repeat(5) { attempt ->
+                if (!isActive || stopRequested || commandClient !== client) return@launch
+                val res = runCatching { client.connect() }
+                if (res.isSuccess) return@launch
+                if (attempt == 4) {
+                    VpnRuntimeState.appendLog(
+                        "Core",
+                        "اتصال CommandClient انجام نشد (${res.exceptionOrNull()?.message ?: "unknown"})؛ پایش ترافیک از مسیر سیستم فعال است"
+                    )
+                } else {
+                    delay(250L)
+                }
+            }
         }
+    }
+
+    private fun startTrafficMonitor(
+        socksServer: LocalSocksAntiDpiServer?,
+        baseUidRx: Long,
+        baseUidTx: Long
+    ) {
+        trafficMonitorJob?.cancel()
+        val uid = Process.myUid()
+        val uidSupported = baseUidRx >= 0L && baseUidTx >= 0L
+        val safeBaseRx = if (uidSupported) baseUidRx else 0L
+        val safeBaseTx = if (uidSupported) baseUidTx else 0L
+
+        trafficMonitorJob = serviceScope.launch {
+            var (prevRx, prevTx) = readSessionTrafficBytes(uid, uidSupported, safeBaseRx, safeBaseTx, socksServer)
+            var lastTickMs = System.currentTimeMillis()
+            if ((System.currentTimeMillis() - lastLibboxStatusMs) >= 2500L && (prevRx > 0L || prevTx > 0L)) {
+                VpnRuntimeState.setTrafficTotals(prevRx, prevTx, 0L, 0L)
+            }
+
+            while (isActive && !stopRequested) {
+                delay(1000L)
+                val now = System.currentTimeMillis()
+                val (curRx, curTx) = readSessionTrafficBytes(uid, uidSupported, safeBaseRx, safeBaseTx, socksServer)
+                val elapsedMs = (now - lastTickMs).coerceAtLeast(250L)
+                val rxBps = ((curRx - prevRx).coerceAtLeast(0L) * 1000L) / elapsedMs
+                val txBps = ((curTx - prevTx).coerceAtLeast(0L) * 1000L) / elapsedMs
+                prevRx = curRx
+                prevTx = curTx
+                lastTickMs = now
+
+                val libboxFresh = (now - lastLibboxStatusMs) < 2500L
+                if (!libboxFresh) {
+                    VpnRuntimeState.setTrafficTotals(
+                        rxTotal = curRx,
+                        txTotal = curTx,
+                        rxSpeed = rxBps,
+                        txSpeed = txBps
+                    )
+                }
+            }
+        }
+    }
+
+    private fun readSessionTrafficBytes(
+        uid: Int,
+        uidSupported: Boolean,
+        baseUidRx: Long,
+        baseUidTx: Long,
+        socksServer: LocalSocksAntiDpiServer?
+    ): Pair<Long, Long> {
+        val uidRx = if (uidSupported) {
+            val raw = TrafficStats.getUidRxBytes(uid)
+            if (raw >= baseUidRx) raw - baseUidRx else 0L
+        } else 0L
+        val uidTx = if (uidSupported) {
+            val raw = TrafficStats.getUidTxBytes(uid)
+            if (raw >= baseUidTx) raw - baseUidTx else 0L
+        } else 0L
+        val (socksRx, socksTx) = socksServer?.getTrafficSnapshot() ?: (0L to 0L)
+        return maxOf(uidRx, socksRx) to maxOf(uidTx, socksTx)
     }
 
     private val serverHandler = object : CommandServerHandler {
@@ -598,13 +698,20 @@ class SeparVpnService : VpnService() {
         override fun writeServiceStatus(message: ServiceStatusMessage?) {}
 
         override fun writeStatus(message: StatusMessage?) {
-            if (message == null) return
-            VpnRuntimeState.setTrafficTotals(
-                rxTotal = message.downlinkTotal,
-                txTotal = message.uplinkTotal,
-                rxSpeed = message.downlink,
-                txSpeed = message.uplink
-            )
+            if (message == null || !message.trafficAvailable) return
+            val rxTotal = message.downlinkTotal.coerceAtLeast(0L)
+            val txTotal = message.uplinkTotal.coerceAtLeast(0L)
+            val rxSpeed = message.downlink.coerceAtLeast(0L)
+            val txSpeed = message.uplink.coerceAtLeast(0L)
+            if (rxTotal > 0L || txTotal > 0L || rxSpeed > 0L || txSpeed > 0L) {
+                lastLibboxStatusMs = System.currentTimeMillis()
+                VpnRuntimeState.setTrafficTotals(
+                    rxTotal = rxTotal,
+                    txTotal = txTotal,
+                    rxSpeed = rxSpeed,
+                    txSpeed = txSpeed
+                )
+            }
         }
     }
 
@@ -619,6 +726,11 @@ class SeparVpnService : VpnService() {
     }
 
     private fun cleanupTunnelResources() {
+        trafficMonitorJob?.cancel()
+        trafficMonitorJob = null
+        commandClientJob?.cancel()
+        commandClientJob = null
+        lastLibboxStatusMs = 0L
         runCatching { commandClient?.disconnect() }
         commandClient = null
         runCatching { commandServer?.closeService() }
