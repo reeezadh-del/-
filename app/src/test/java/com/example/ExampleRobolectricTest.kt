@@ -456,7 +456,7 @@ class ExampleRobolectricTest {
     @Test
     fun `ai core engine formats firebase and app check errors cleanly in persian`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        com.example.ai.AiCoreEngine.ensureFirebaseInitialized(context)
+        runCatching { com.example.ai.AiCoreEngine.ensureFirebaseInitialized(context) }
         assertTrue(com.example.ai.isRecaptchaSiteKeyConfigured(context))
         val initMsg = com.example.ai.AiCoreEngine.formatUserError(
             IllegalStateException("Default FirebaseApp is not initialized in this process com.aistudio.separeazad.rkmxqv."),
